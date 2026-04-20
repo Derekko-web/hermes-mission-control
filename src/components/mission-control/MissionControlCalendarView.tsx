@@ -3,17 +3,22 @@
 import { startTransition, useMemo, useState } from "react";
 import type { FormEvent } from "react";
 import { Loader, Plus } from "lucide-react";
-import { useConvexConnectionState, useMutation, useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { api } from "../../../convex/_generated/api";
+import {
+  MISSION_CONTROL_TEMPLATE,
+  SCHEDULE_OWNER_OPTIONS,
+  getScheduleOwnerMeta,
+} from "../../../shared/missionControlTemplate";
 import { MissionControlCalendarLayout } from "./MissionControlCalendarLayout";
 
 type ScheduledItemDoc = Doc<"scheduledItems">;
-type ScheduledItemCadence = "once" | "daily" | "weekly" | "biweekly" | "observed";
-type ScheduledItemKind = "cron_job" | "scheduled_task" | "observed_automation";
-type ScheduledItemOwner = "you" | "codex" | "system";
-type ScheduledItemColor = "indigo" | "amber" | "emerald" | "rose" | "cyan" | "violet";
+type ScheduledItemCadence = ScheduledItemDoc["cadence"];
+type ScheduledItemKind = ScheduledItemDoc["kind"];
+type ScheduledItemOwner = ScheduledItemDoc["owner"];
+type ScheduledItemColor = ScheduledItemDoc["color"];
 
 type ScheduleFormState = {
   title: string;
@@ -69,13 +74,13 @@ const CADENCE_LABELS: Record<ScheduledItemCadence, string> = {
 const DEFAULT_FORM: ScheduleFormState = {
   title: "",
   description: "",
-  owner: "codex",
+  owner: MISSION_CONTROL_TEMPLATE.primaryOperator.id,
   kind: "scheduled_task",
   cadence: "weekly",
   anchorInput: "",
   durationMinutes: "45",
   color: "indigo",
-  project: "Mission Control",
+  project: MISSION_CONTROL_TEMPLATE.workspaceTitle,
   sourcePath: "",
   command: "",
 };
@@ -271,15 +276,12 @@ export function MissionControlCalendarView({
 }) {
   const scheduledItemsQuery = useQuery(api.scheduledItems.list);
   const createScheduledItem = useMutation(api.scheduledItems.create);
-  const connectionState = useConvexConnectionState();
 
   const [isComposerOpen, setIsComposerOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [formState, setFormState] = useState<ScheduleFormState>(DEFAULT_FORM);
 
   const scheduledItems = scheduledItemsQuery ?? initialScheduledItems ?? EMPTY_SCHEDULED_ITEMS;
-  const isLoading = scheduledItemsQuery === undefined && initialScheduledItems.length === 0;
-  const isRealtime = connectionState.hasEverConnected && connectionState.isWebSocketConnected;
 
   const weekStart = useMemo(() => startOfUtcWeek(Date.now()), []);
   const todayStart = useMemo(() => startOfUtcDay(Date.now()), []);
@@ -406,9 +408,11 @@ export function MissionControlCalendarView({
               }
               className="w-full rounded-2xl border border-white/[0.08] bg-[#0b0d11] px-4 py-3 text-sm text-white outline-none"
             >
-              <option value="you">You</option>
-              <option value="codex">Codex</option>
-              <option value="system">System</option>
+              {SCHEDULE_OWNER_OPTIONS.map((option) => (
+                <option key={option.id} value={option.id}>
+                  {getScheduleOwnerMeta(option.id).label}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -490,7 +494,7 @@ export function MissionControlCalendarView({
             <input
               value={formState.project}
               onChange={(event) => setFormState((current) => ({ ...current, project: event.target.value }))}
-              placeholder="Mission Control"
+              placeholder={MISSION_CONTROL_TEMPLATE.workspaceTitle}
               className="w-full rounded-2xl border border-white/[0.08] bg-[#0b0d11] px-4 py-3 text-sm text-white outline-none transition focus:border-[#8992ff]/40"
             />
           </label>
@@ -540,16 +544,11 @@ export function MissionControlCalendarView({
     </form>
   ) : null;
 
-  const utilityTone = isLoading ? "loading" : isRealtime ? "live" : "snapshot";
-  const utilityLabel = isLoading ? "Syncing" : isRealtime ? "Live schedule" : "Snapshot";
-
   return (
     <MissionControlCalendarLayout
       isComposerOpen={isComposerOpen}
       onToggleComposer={() => setIsComposerOpen((current) => !current)}
       composer={composer}
-      utilityLabel={utilityLabel}
-      utilityTone={utilityTone}
       title="Scheduled Tasks"
       subtitle="Mission Control automated routines"
       runningItems={observedItems.map((item) => ({

@@ -9,15 +9,7 @@ const taskStatus = v.union(
   v.literal("done"),
 );
 
-const taskAssignee = v.union(
-  v.literal("you"),
-  v.literal("codex"),
-  v.literal("mcclintock"),
-  v.literal("confucius"),
-  v.literal("banach"),
-  v.literal("lorentz"),
-  v.literal("unassigned"),
-);
+const taskAssignee = v.string();
 
 const taskPriority = v.union(
   v.literal("low"),
@@ -31,11 +23,7 @@ const scheduledItemKind = v.union(
   v.literal("observed_automation"),
 );
 
-const scheduledItemOwner = v.union(
-  v.literal("you"),
-  v.literal("codex"),
-  v.literal("system"),
-);
+const scheduledItemOwner = v.string();
 
 const scheduledItemCadence = v.union(
   v.literal("once"),
@@ -200,7 +188,8 @@ export default defineSchema({
     color: teamColor,
     avatarLabel: v.string(),
     responsibilities: v.array(v.string()),
-    takesFromCodex: v.array(v.string()),
+    focusAreas: v.optional(v.array(v.string())),
+    takesFromCodex: v.optional(v.array(v.string())),
     sourceLabel: v.optional(v.string()),
     lastObservedAt: v.optional(v.number()),
     sortOrder: v.number(),

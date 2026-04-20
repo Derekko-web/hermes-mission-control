@@ -2,67 +2,70 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
+import { MISSION_CONTROL_TEMPLATE } from "../shared/missionControlTemplate";
 import { MissionControlOfficeLayout } from "../src/components/mission-control/MissionControlOfficeLayout";
 
 function countMatches(haystack: string, pattern: RegExp) {
   return [...haystack.matchAll(pattern)].length;
 }
 
-test("renders the refined office operations layout with live-only activity and idle clustering", () => {
+const [lead, architect, , writer, designer] = MISSION_CONTROL_TEMPLATE.operators;
+
+test("renders the refined office operations layout with portable operator labels", () => {
   const markup = renderToStaticMarkup(
     <MissionControlOfficeLayout
       title="The Office"
       subtitle="Mission Control headquarters"
       sceneMembers={[
         {
-          id: "codex",
-          name: "Codex",
-          roleTitle: "Lead Builder",
+          id: lead.id,
+          name: lead.label,
+          roleTitle: lead.roleTitle,
           area: "south_station",
           statusLabel: "Working",
-          currentTask: "Build the digital office screen",
+          currentTask: "Customize the portable workspace template",
           activeTool: "Mission Control",
           accent: "amber",
-          avatarLabel: "C",
+          avatarLabel: lead.avatarLabel,
           presenceMode: "desk",
           showBubble: true,
         },
         {
-          id: "mcclintock",
-          name: "McClintock",
-          roleTitle: "Architecture Scout",
+          id: architect.id,
+          name: architect.label,
+          roleTitle: architect.roleTitle,
           area: "north_station",
           statusLabel: "Idle",
-          currentTask: "Trace implementation edges",
+          currentTask: "Map local repo boundaries",
           activeTool: "Codebase",
           accent: "emerald",
-          avatarLabel: "M",
+          avatarLabel: architect.avatarLabel,
           presenceMode: "idle",
           showBubble: false,
         },
         {
-          id: "lorentz",
-          name: "Lorentz",
-          roleTitle: "Designer Specialist",
+          id: designer.id,
+          name: designer.label,
+          roleTitle: designer.roleTitle,
           area: "northeast_station",
           statusLabel: "Idle",
-          currentTask: "Polish office layout",
+          currentTask: "Polish portable workspace shell",
           activeTool: "Design system",
           accent: "rose",
-          avatarLabel: "L",
+          avatarLabel: designer.avatarLabel,
           presenceMode: "idle",
           showBubble: false,
         },
         {
-          id: "banach",
-          name: "Banach",
-          roleTitle: "Writer Specialist",
+          id: writer.id,
+          name: writer.label,
+          roleTitle: writer.roleTitle,
           area: "east_station",
           statusLabel: "Idle",
-          currentTask: "Refine status copy",
+          currentTask: "Document local setup notes",
           activeTool: "Docs",
           accent: "violet",
-          avatarLabel: "B",
+          avatarLabel: writer.avatarLabel,
           presenceMode: "idle",
           showBubble: false,
         },
@@ -71,8 +74,8 @@ test("renders the refined office operations layout with live-only activity and i
       activityItems={[
         {
           id: "activity-1",
-          memberName: "Codex",
-          detail: "Build the digital office screen",
+          memberName: lead.label,
+          detail: "Customize the portable workspace template",
           meta: "Working · South station · Mission Control · just now",
           tone: "amber",
         },
@@ -89,7 +92,7 @@ test("renders the refined office operations layout with live-only activity and i
   assert.doesNotMatch(markup, /HQ floor/);
   assert.doesNotMatch(markup, /Presence feed/);
   assert.match(markup, /Live Activity/);
-  assert.match(markup, /Build the digital office screen/);
+  assert.match(markup, /Customize the portable workspace template/);
   assert.doesNotMatch(markup, /data-slot="office-status-strip"/);
   assert.doesNotMatch(markup, /data-slot="office-status-legend"/);
   assert.match(markup, /data-slot="office-scene-panel"/);

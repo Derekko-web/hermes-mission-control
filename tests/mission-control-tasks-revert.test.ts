@@ -7,7 +7,7 @@ const tasksMutationPath = new URL("../convex/tasks.ts", import.meta.url);
 const taskCardPath = new URL("../src/components/mission-control/MissionControlTaskCard.tsx", import.meta.url);
 const taskEditorPath = new URL("../src/components/mission-control/MissionControlTaskEditor.tsx", import.meta.url);
 
-test("restores the original Tasks board implementation without task-card editing feature code", () => {
+test("keeps the simplified Tasks board implementation without task-card editing feature files", () => {
   const tasksViewSource = readFileSync(tasksViewPath, "utf8");
   const tasksMutationSource = readFileSync(tasksMutationPath, "utf8");
 
@@ -16,5 +16,5 @@ test("restores the original Tasks board implementation without task-card editing
   assert.doesNotMatch(tasksViewSource, /MissionControlTaskEditor/);
   assert.equal(existsSync(taskCardPath), false);
   assert.equal(existsSync(taskEditorPath), false);
-  assert.doesNotMatch(tasksMutationSource, /export const remove = mutation/);
+  assert.match(tasksMutationSource, /export const remove = mutation/);
 });

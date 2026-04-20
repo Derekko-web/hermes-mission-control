@@ -1,6 +1,8 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
+import { buildStarterTasks, inferTemplateAssignee } from "../shared/missionControlTemplate";
+
 const taskStatus = v.union(
   v.literal("recurring"),
   v.literal("backlog"),
@@ -9,15 +11,7 @@ const taskStatus = v.union(
   v.literal("done"),
 );
 
-const taskAssignee = v.union(
-  v.literal("you"),
-  v.literal("codex"),
-  v.literal("mcclintock"),
-  v.literal("confucius"),
-  v.literal("banach"),
-  v.literal("lorentz"),
-  v.literal("unassigned"),
-);
+const taskAssignee = v.string();
 
 const taskPriority = v.union(
   v.literal("low"),
@@ -25,39 +19,10 @@ const taskPriority = v.union(
   v.literal("high"),
 );
 
-type TaskAssignee =
-  | "you"
-  | "codex"
-  | "mcclintock"
-  | "confucius"
-  | "banach"
-  | "lorentz"
-  | "unassigned";
+type TaskAssignee = string;
 
-function normalizeText(value: string | undefined) {
-  return value?.trim().toLowerCase() ?? "";
-}
-
-function inferNamedAssignee(title: string, description?: string): Exclude<TaskAssignee, "you" | "unassigned"> {
-  const haystack = `${normalizeText(title)} ${normalizeText(description)}`;
-
-  if (/\b(office|team|refine|ui|design|layout|visual|polish|shell)\b/.test(haystack)) {
-    return "lorentz";
-  }
-
-  if (/\b(memory|docs|copy|content|summary|writer|document)\b/.test(haystack)) {
-    return "banach";
-  }
-
-  if (/\b(convex|deployment|schema|loading|fallback|architecture|infrastructure)\b/.test(haystack)) {
-    return "mcclintock";
-  }
-
-  if (/\b(calendar|chat|hermes|realtime|fix|build|ship)\b/.test(haystack) || haystack.includes("task board") || haystack.includes("tasks board")) {
-    return "confucius";
-  }
-
-  return "codex";
+function inferNamedAssignee(title: string, description?: string): TaskAssignee {
+  return inferTemplateAssignee(title, description);
 }
 
 export const list = query({
@@ -143,6 +108,21 @@ export const update = mutation({
   },
 });
 
+export const remove = mutation({
+  args: {
+    id: v.id("tasks"),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.id);
+    if (!existing) {
+      return { deleted: false, id: args.id };
+    }
+
+    await ctx.db.delete(args.id);
+    return { deleted: true, id: args.id };
+  },
+});
+
 export const ensureSeedData = mutation({
   args: {},
   handler: async (ctx) => {
@@ -152,63 +132,7 @@ export const ensureSeedData = mutation({
     }
 
     const now = Date.now();
-    const seededTasks = [
-      {
-        title: "Provision local Convex deployment",
-        description: "Keep Mission Control backed by a live local database instead of static mock data.",
-        status: "done" as const,
-        assignee: "mcclintock" as const,
-        priority: "high" as const,
-        project: "Mission Control",
-        createdBy: "system",
-        createdAt: now - 1000 * 60 * 48,
-        updatedAt: now - 1000 * 60 * 6,
-      },
-      {
-        title: "Build Mission Control workspace shell",
-        description: "Create the dedicated app surface with sidebar navigation and Linear-style density.",
-        status: "done" as const,
-        assignee: "codex" as const,
-        priority: "high" as const,
-        project: "Mission Control",
-        createdBy: "system",
-        createdAt: now - 1000 * 60 * 40,
-        updatedAt: now - 1000 * 60 * 5,
-      },
-      {
-        title: "Ship the real-time tasks board",
-        description: "Track status, assignee, and live edits for every active task in one place.",
-        status: "done" as const,
-        assignee: "confucius" as const,
-        priority: "high" as const,
-        project: "Mission Control",
-        createdBy: "system",
-        createdAt: now - 1000 * 60 * 35,
-        updatedAt: now - 1000 * 60 * 4,
-      },
-      {
-        title: "Track all new work here going forward",
-        description: "Use this board as the shared operating surface for tasks assigned to you or Codex.",
-        status: "in_progress" as const,
-        assignee: "codex" as const,
-        priority: "medium" as const,
-        project: "Mission Control",
-        createdBy: "system",
-        createdAt: now - 1000 * 60 * 12,
-        updatedAt: now - 1000 * 60 * 2,
-      },
-      {
-        title: "Choose the second Mission Control tool",
-        description: "Decide what custom tool should land after Tasks.",
-        status: "backlog" as const,
-        assignee: "you" as const,
-        priority: "medium" as const,
-        project: "Mission Control",
-        createdBy: "system",
-        createdAt: now - 1000 * 60 * 8,
-        updatedAt: now - 1000 * 60 * 1,
-      },
-    ];
+    const seededTasks = buildStarterTasks(now);
 
     for (const task of seededTasks) {
       await ctx.db.insert("tasks", task);

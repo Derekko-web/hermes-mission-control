@@ -7,21 +7,27 @@ import { useMutation, useQuery } from "convex/react";
 
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { api } from "../../../convex/_generated/api";
+import {
+  MISSION_CONTROL_TEMPLATE,
+  TASK_ASSIGNEE_OPTIONS,
+  getTaskAssigneeMeta,
+} from "../../../shared/missionControlTemplate";
 import { MissionControlNewTaskButton } from "./MissionControlNewTaskButton";
 import { TaskColumnEmptyState } from "./TaskColumnEmptyState";
 
-type TaskStatus = "recurring" | "backlog" | "in_progress" | "review" | "done";
-type TaskAssignee =
-  | "you"
-  | "codex"
-  | "mcclintock"
-  | "confucius"
-  | "banach"
-  | "lorentz"
-  | "unassigned";
-type TaskPriority = "low" | "medium" | "high";
-type AssigneeFilter = "all" | TaskAssignee;
 type TaskDoc = Doc<"tasks">;
+type TaskStatus = TaskDoc["status"];
+type TaskAssignee = TaskDoc["assignee"];
+type TaskPriority = TaskDoc["priority"];
+type AssigneeFilter = "all" | TaskAssignee;
+type TaskFormState = {
+  title: string;
+  description: string;
+  assignee: TaskAssignee;
+  status: TaskStatus;
+  priority: TaskPriority;
+  project: string;
+};
 
 const STATUS_ORDER: TaskStatus[] = ["recurring", "backlog", "in_progress", "review", "done"];
 
@@ -60,51 +66,6 @@ const STATUS_META: Record<
   },
 };
 
-const ASSIGNEE_META: Record<
-  TaskAssignee,
-  {
-    label: string;
-    avatarClassName: string;
-    avatarText: string;
-  }
-> = {
-  you: {
-    label: "You",
-    avatarClassName: "bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-400/15",
-    avatarText: "Y",
-  },
-  codex: {
-    label: "Codex",
-    avatarClassName: "bg-indigo-400/15 text-indigo-200 ring-1 ring-indigo-400/15",
-    avatarText: "C",
-  },
-  mcclintock: {
-    label: "McClintock",
-    avatarClassName: "bg-emerald-400/15 text-emerald-200 ring-1 ring-emerald-400/15",
-    avatarText: "M",
-  },
-  confucius: {
-    label: "Confucius",
-    avatarClassName: "bg-cyan-400/15 text-cyan-200 ring-1 ring-cyan-400/15",
-    avatarText: "C",
-  },
-  banach: {
-    label: "Banach",
-    avatarClassName: "bg-violet-400/15 text-violet-200 ring-1 ring-violet-400/15",
-    avatarText: "B",
-  },
-  lorentz: {
-    label: "Lorentz",
-    avatarClassName: "bg-rose-400/15 text-rose-200 ring-1 ring-rose-400/15",
-    avatarText: "L",
-  },
-  unassigned: {
-    label: "Unassigned",
-    avatarClassName: "bg-white/8 text-zinc-300 ring-1 ring-white/10",
-    avatarText: "U",
-  },
-};
-
 const PRIORITY_META: Record<
   TaskPriority,
   {
@@ -130,34 +91,24 @@ const PRIORITY_META: Record<
   },
 };
 
-const DEFAULT_FORM = {
+const DEFAULT_FORM: TaskFormState = {
   title: "",
   description: "",
-  assignee: "codex" as TaskAssignee,
+  assignee: MISSION_CONTROL_TEMPLATE.primaryOperator.id as TaskAssignee,
   status: "backlog" as TaskStatus,
   priority: "medium" as TaskPriority,
-  project: "Mission Control",
+  project: MISSION_CONTROL_TEMPLATE.workspaceTitle,
 };
 
 const ASSIGNEE_FILTERS: Array<{ id: AssigneeFilter; label: string }> = [
   { id: "all", label: "All" },
-  { id: "you", label: "You" },
-  { id: "codex", label: "Codex" },
-  { id: "mcclintock", label: "McClintock" },
-  { id: "confucius", label: "Confucius" },
-  { id: "banach", label: "Banach" },
-  { id: "lorentz", label: "Lorentz" },
+  ...TASK_ASSIGNEE_OPTIONS.filter((option) => option.id !== "unassigned").map((option) => ({
+    id: option.id as AssigneeFilter,
+    label: option.label,
+  })),
 ];
 
-const ASSIGNEE_OPTIONS: TaskAssignee[] = [
-  "you",
-  "codex",
-  "mcclintock",
-  "confucius",
-  "banach",
-  "lorentz",
-  "unassigned",
-];
+const ASSIGNEE_OPTIONS: TaskAssignee[] = TASK_ASSIGNEE_OPTIONS.map((option) => option.id);
 
 const relativeTimeFormat = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
@@ -196,7 +147,7 @@ function matchesSearch(task: TaskDoc, deferredSearch: string) {
     task.title,
     task.description,
     task.project,
-    ASSIGNEE_META[task.assignee].label,
+    getTaskAssigneeMeta(task.assignee).label,
     PRIORITY_META[task.priority].label,
   ]
     .filter(Boolean)
@@ -217,7 +168,7 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
   const [projectFilter, setProjectFilter] = useState("all");
   const [searchText, setSearchText] = useState("");
   const [draggedTaskId, setDraggedTaskId] = useState<Id<"tasks"> | null>(null);
-  const [formState, setFormState] = useState(DEFAULT_FORM);
+  const [formState, setFormState] = useState<TaskFormState>(DEFAULT_FORM);
 
   const tasks = tasksQuery ?? initialTasks;
   const deferredSearch = useDeferredValue(searchText.trim().toLowerCase());
@@ -421,7 +372,7 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
                   >
                     {ASSIGNEE_OPTIONS.map((assignee) => (
                       <option key={assignee} value={assignee}>
-                        {ASSIGNEE_META[assignee].label}
+                        {getTaskAssigneeMeta(assignee).label}
                       </option>
                     ))}
                   </select>
@@ -476,7 +427,7 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
                   <input
                     value={formState.project}
                     onChange={(event) => setFormState((current) => ({ ...current, project: event.target.value }))}
-                    placeholder="Mission Control"
+                    placeholder={MISSION_CONTROL_TEMPLATE.workspaceTitle}
                     className="h-12 w-full rounded-2xl border border-white/8 bg-[#0d0d12] px-4 text-sm text-white outline-none transition focus:border-white/16"
                   />
                 </label>
@@ -567,12 +518,12 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
                     <div className="mt-4 flex items-center justify-between gap-3 text-xs">
                       <span className="inline-flex min-w-0 items-center gap-2.5">
                         <span
-                          className={`flex h-7 w-7 flex-none items-center justify-center rounded-full text-[11px] font-semibold ${ASSIGNEE_META[task.assignee].avatarClassName}`}
+                          className={`flex h-7 w-7 flex-none items-center justify-center rounded-full text-[11px] font-semibold ${getTaskAssigneeMeta(task.assignee).avatarClassName}`}
                         >
-                          {ASSIGNEE_META[task.assignee].avatarText}
+                          {getTaskAssigneeMeta(task.assignee).avatarText}
                         </span>
                         <span className="truncate text-[12px] font-medium text-zinc-400">
-                          {ASSIGNEE_META[task.assignee].label}
+                          {getTaskAssigneeMeta(task.assignee).label}
                         </span>
                       </span>
 

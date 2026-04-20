@@ -1,17 +1,15 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
+import { buildStarterScheduledItems } from "../shared/missionControlTemplate";
+
 const scheduledItemKind = v.union(
   v.literal("cron_job"),
   v.literal("scheduled_task"),
   v.literal("observed_automation"),
 );
 
-const scheduledItemOwner = v.union(
-  v.literal("you"),
-  v.literal("codex"),
-  v.literal("system"),
-);
+const scheduledItemOwner = v.string();
 
 const scheduledItemCadence = v.union(
   v.literal("once"),
@@ -81,68 +79,7 @@ export const ensureSeedData = mutation({
     }
 
     const now = Date.now();
-    const seedItems = [
-      {
-        title: "Arizona Radar observed automation",
-        description:
-          "Observed from runtime store activity. Hermes-backed radar sweeps appear to run throughout the day behind a flock lock.",
-        kind: "observed_automation" as const,
-        owner: "codex" as const,
-        cadence: "observed" as const,
-        color: "emerald" as const,
-        project: "Arizona Radar",
-        sourcePath: "scripts/arizona_radar/cron_sync.sh",
-        command: "node scripts/arizona_radar/run.cjs run",
-        anchorAt: undefined,
-        dayOfWeek: undefined,
-        timeMinutes: undefined,
-        durationMinutes: 10,
-        lastObservedAt: Date.parse("2026-04-19T21:40:01.691Z"),
-        isActive: true,
-        createdAt: now - 1000 * 60 * 40,
-        updatedAt: now - 1000 * 60 * 4,
-      },
-      {
-        title: "Sunbird article sync",
-        description:
-          "Biweekly ingestion job for Sunbird article imports, anchored directly from the repo cron wrapper.",
-        kind: "cron_job" as const,
-        owner: "codex" as const,
-        cadence: "biweekly" as const,
-        color: "amber" as const,
-        project: "Article Ingest",
-        sourcePath: "scripts/article_ingest/cron_sync.sh",
-        command: "npm run scrape:articles:sunbird",
-        anchorAt: Date.parse("2026-04-20T03:17:00Z"),
-        dayOfWeek: 1,
-        timeMinutes: 3 * 60 + 17,
-        durationMinutes: 105,
-        lastObservedAt: undefined,
-        isActive: true,
-        createdAt: now - 1000 * 60 * 35,
-        updatedAt: now - 1000 * 60 * 3,
-      },
-      {
-        title: "Atlas Obscura Arizona sync",
-        description:
-          "Weekly Atlas ingest run using the shell wrapper checked into the repo. Stored here so the schedule stays visible in Mission Control.",
-        kind: "cron_job" as const,
-        owner: "codex" as const,
-        cadence: "weekly" as const,
-        color: "indigo" as const,
-        project: "Atlas Obscura",
-        sourcePath: "scripts/atlas_obscura_ingest/cron_sync.sh",
-        command: "npm run atlas:sync",
-        anchorAt: Date.parse("2026-04-20T04:00:00Z"),
-        dayOfWeek: 1,
-        timeMinutes: 4 * 60,
-        durationMinutes: 90,
-        lastObservedAt: undefined,
-        isActive: true,
-        createdAt: now - 1000 * 60 * 30,
-        updatedAt: now - 1000 * 60 * 2,
-      },
-    ];
+    const seedItems = buildStarterScheduledItems(now);
 
     for (const item of seedItems) {
       await ctx.db.insert("scheduledItems", item);

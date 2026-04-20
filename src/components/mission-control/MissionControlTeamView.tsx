@@ -19,7 +19,7 @@ function buildNode(member: TeamMemberDoc): MissionControlTeamNode {
     summary: member.summary ?? member.tagline ?? `${member.name} supports Mission Control with a dedicated specialty lane.`,
     avatarLabel: member.avatarLabel,
     accent: member.color as MissionControlTeamAccent,
-    chips: member.takesFromCodex.slice(0, 3),
+    chips: (member.focusAreas ?? member.takesFromCodex ?? []).slice(0, 3),
     meta: "Role card →",
   };
 }

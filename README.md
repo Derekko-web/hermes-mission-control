@@ -1,6 +1,6 @@
 # Hermes Mission Control
 
-Standalone Mission Control app for Hermes, extracted from the dev.chinesearizona workspace.
+Standalone Mission Control app for Hermes
 
 ## Branches
 

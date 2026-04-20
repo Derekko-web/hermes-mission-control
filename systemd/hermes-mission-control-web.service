@@ -1,0 +1,17 @@
+[Unit]
+Description=Hermes Mission Control web app
+After=network.target hermes-mission-control-db.service
+Requires=hermes-mission-control-db.service
+
+[Service]
+Type=simple
+User=derek
+WorkingDirectory=/home/derek/.hermes/mission-control
+Environment=HOME=/home/derek
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/npm run start
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

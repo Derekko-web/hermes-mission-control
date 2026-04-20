@@ -1,0 +1,16 @@
+[Unit]
+Description=Hermes Mission Control Convex local backend
+After=network.target
+
+[Service]
+Type=simple
+User=derek
+WorkingDirectory=/home/derek/.hermes/mission-control
+Environment=HOME=/home/derek
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+ExecStart=/usr/bin/npm run convex:dev
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

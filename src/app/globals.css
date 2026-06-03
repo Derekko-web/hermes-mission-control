@@ -1,7 +1,38 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:is(.dark *));
+
+@font-face {
+  font-family: "FS Pixel Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("/mission-control-office/fonts/FSPixelSansUnicode-Regular.ttf") format("truetype");
+}
+
 @theme {
   --font-sans: 'Inter', 'Noto Sans TC', sans-serif;
+  --font-pixel-agents: "FS Pixel Sans", monospace;
+
+  /* Pixel Agents canvas shell */
+  --color-bg: #1e1e2e;
+  --color-bg-dark: #181828;
+  --color-bg-thumb: #2a2a3a;
+  --color-border: #4a4a6a;
+  --color-accent: #6030ff;
+  --color-accent-bright: #746fff;
+  --color-text: rgba(255, 255, 255, 0.9);
+  --color-text-muted: rgba(255, 255, 255, 0.5);
+  --color-btn-bg: rgb(53, 52, 69);
+  --color-btn-hover: rgb(78, 75, 104);
+  --color-active-bg: rgb(44, 43, 109);
+  --color-reset-text: #ecc;
+  --color-danger: #d14249;
+  --color-warning: #ff8d14;
+  --color-status-permission: #cca700;
+  --color-status-active: #3794ff;
+  --color-status-success: #89d185;
+  --color-status-error: #d14249;
 
   /* Brand Colors */
   --color-brand-50: #eff6ff;
@@ -28,6 +59,18 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+}
+
+html.mission-control-light body {
+  background-color: #f8fafc;
+  color: #18181b;
+}
+
+html.mission-control-light [data-slot="mission-control-light-mode-button"] {
+  border-color: rgba(24, 24, 27, 0.12);
+  background: rgba(255, 255, 255, 0.9);
+  color: #18181b;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
 }
 
 @keyframes shop-dashboard-enter {
@@ -85,6 +128,16 @@ body {
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% center;
+  }
+
+  to {
+    background-position: -200% center;
   }
 }
 

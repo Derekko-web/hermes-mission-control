@@ -2,6 +2,9 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
 const taskStatus = v.union(
+  v.literal("Not started"),
+  v.literal("In progress"),
+  v.literal("Done"),
   v.literal("recurring"),
   v.literal("backlog"),
   v.literal("in_progress"),
@@ -15,6 +18,12 @@ const taskPriority = v.union(
   v.literal("low"),
   v.literal("medium"),
   v.literal("high"),
+);
+
+const hermesLaunchMode = v.union(
+  v.literal("manual"),
+  v.literal("confirm"),
+  v.literal("auto"),
 );
 
 const scheduledItemKind = v.union(
@@ -123,6 +132,15 @@ const hermesAttachment = v.object({
   dataUrl: v.optional(v.string()),
 });
 
+const hermesReasoningEffort = v.union(
+  v.literal("none"),
+  v.literal("minimal"),
+  v.literal("low"),
+  v.literal("medium"),
+  v.literal("high"),
+  v.literal("xhigh"),
+);
+
 export default defineSchema({
   tasks: defineTable({
     title: v.string(),
@@ -133,11 +151,30 @@ export default defineSchema({
     project: v.optional(v.string()),
     createdAt: v.number(),
     updatedAt: v.number(),
+    kanbanOrder: v.optional(v.number()),
     createdBy: v.optional(v.string()),
+    notionDatabaseId: v.optional(v.string()),
+    notionDataSourceId: v.optional(v.string()),
+    notionPageId: v.optional(v.string()),
+    notionUrl: v.optional(v.string()),
+    notionBodyText: v.optional(v.string()),
+    notionLastEditedAt: v.optional(v.number()),
+    notionLastSyncedAt: v.optional(v.number()),
+    notionLastSyncedHash: v.optional(v.string()),
+    notionConflictAt: v.optional(v.number()),
+    notionConflictSummary: v.optional(v.string()),
+    hermesThreadId: v.optional(v.id("hermesThreads")),
+    hermesStartedAt: v.optional(v.number()),
+    hermesLaunchMode: v.optional(hermesLaunchMode),
+    operatorAgentId: v.optional(v.id("teamMembers")),
+    operatorAgentName: v.optional(v.string()),
+    operatorAgentRoleTitle: v.optional(v.string()),
   })
     .index("by_updatedAt", ["updatedAt"])
     .index("by_status", ["status"])
-    .index("by_assignee", ["assignee"]),
+    .index("by_assignee", ["assignee"])
+    .index("by_notionPageId", ["notionPageId"])
+    .index("by_operatorAgentId", ["operatorAgentId"]),
   scheduledItems: defineTable({
     title: v.string(),
     description: v.optional(v.string()),
@@ -218,10 +255,18 @@ export default defineSchema({
     title: v.string(),
     summary: v.optional(v.string()),
     pinned: v.boolean(),
+    hermesSessionId: v.optional(v.string()),
+    officeAgentId: v.optional(v.id("teamMembers")),
+    officeAgentName: v.optional(v.string()),
+    officeAgentRoleTitle: v.optional(v.string()),
+    modelId: v.optional(v.string()),
+    reasoningEffort: v.optional(v.union(hermesReasoningEffort, v.null())),
+    fastModeEnabled: v.optional(v.boolean()),
     lastMessageAt: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_officeAgentId", ["officeAgentId"])
     .index("by_lastMessageAt", ["lastMessageAt"])
     .index("by_updatedAt", ["updatedAt"]),
   hermesMessages: defineTable({

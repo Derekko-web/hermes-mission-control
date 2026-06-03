@@ -2,6 +2,14 @@ export type HermesLayoutThread = {
   id: string;
   title: string;
   active: boolean;
+  officeAgentName?: string;
+  officeAgentRoleTitle?: string;
+};
+
+export type HermesOfficeAgentOption = {
+  id: string;
+  name: string;
+  roleTitle: string;
 };
 
 export type HermesLayoutAttachment = {
@@ -21,12 +29,87 @@ export type HermesLayoutMessage = {
   attachments: HermesLayoutAttachment[];
 };
 
+export const HERMES_REASONING_OPTIONS = ["none", "minimal", "low", "medium", "high", "xhigh"] as const;
+export type HermesReasoningEffort = (typeof HERMES_REASONING_OPTIONS)[number];
+
 export type HermesSlashCommand = {
   id: string;
   label: string;
   description: string;
   aliases?: string[];
 };
+
+export type HermesModelOption = {
+  id: string;
+  label: string;
+  providerLabel: string;
+  supportsReasoning: boolean;
+  supportsFastMode: boolean;
+  reasoningOptions: HermesReasoningEffort[];
+};
+
+export const DEFAULT_HERMES_MODEL_ID = "gpt-5.4";
+export const DEFAULT_HERMES_REASONING_EFFORT: HermesReasoningEffort = "xhigh";
+export const DEFAULT_HERMES_FAST_MODE_ENABLED = true;
+
+export const HERMES_MODEL_OPTIONS: HermesModelOption[] = [
+  {
+    id: "gpt-5.4",
+    label: "GPT-5.4",
+    providerLabel: "OpenAI Codex",
+    supportsReasoning: true,
+    supportsFastMode: true,
+    reasoningOptions: [...HERMES_REASONING_OPTIONS],
+  },
+  {
+    id: "gpt-5.4-mini",
+    label: "GPT-5.4 Mini",
+    providerLabel: "OpenAI Codex",
+    supportsReasoning: true,
+    supportsFastMode: true,
+    reasoningOptions: [...HERMES_REASONING_OPTIONS],
+  },
+  {
+    id: "claude-opus-4.7",
+    label: "Claude Opus 4.7",
+    providerLabel: "Anthropic",
+    supportsReasoning: true,
+    supportsFastMode: false,
+    reasoningOptions: ["minimal", "low", "medium", "high", "xhigh"],
+  },
+  {
+    id: "claude-sonnet-4.6",
+    label: "Claude Sonnet 4.6",
+    providerLabel: "Anthropic",
+    supportsReasoning: true,
+    supportsFastMode: true,
+    reasoningOptions: ["minimal", "low", "medium", "high", "xhigh"],
+  },
+  {
+    id: "claude-code",
+    label: "Claude Code",
+    providerLabel: "Anthropic",
+    supportsReasoning: false,
+    supportsFastMode: false,
+    reasoningOptions: [],
+  },
+  {
+    id: "arcee-ai/trinity-mini",
+    label: "Trinity Mini",
+    providerLabel: "Arcee AI",
+    supportsReasoning: false,
+    supportsFastMode: false,
+    reasoningOptions: [],
+  },
+  {
+    id: "arcee-ai/trinity-large-thinking",
+    label: "Trinity Large Thinking",
+    providerLabel: "Arcee AI",
+    supportsReasoning: true,
+    supportsFastMode: false,
+    reasoningOptions: ["minimal", "low", "medium", "high", "xhigh"],
+  },
+];
 
 export const HERMES_SLASH_COMMANDS: HermesSlashCommand[] = [
   { id: "new", label: "/new", aliases: ["/reset"], description: "Fresh session." },
@@ -90,6 +173,48 @@ export function formatHermesAttachmentSize(sizeBytes: number): string {
   }
 
   return `${(sizeBytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export function findHermesModelOption(modelId?: string | null): HermesModelOption {
+  return (
+    HERMES_MODEL_OPTIONS.find((option) => option.id === modelId) ??
+    HERMES_MODEL_OPTIONS.find((option) => option.id === DEFAULT_HERMES_MODEL_ID) ??
+    HERMES_MODEL_OPTIONS[0]
+  );
+}
+
+export function getHermesReasoningOptions(modelId?: string | null): HermesReasoningEffort[] {
+  const option = findHermesModelOption(modelId);
+  return option.supportsReasoning ? option.reasoningOptions : [];
+}
+
+export function normalizeHermesThreadSettings(settings: {
+  modelId?: string | null;
+  reasoningEffort?: HermesReasoningEffort | null | undefined;
+  fastModeEnabled?: boolean | null | undefined;
+}) {
+  const model = findHermesModelOption(settings.modelId);
+  const reasoningOptions = getHermesReasoningOptions(model.id);
+  const defaultReasoning = reasoningOptions.includes(DEFAULT_HERMES_REASONING_EFFORT)
+    ? DEFAULT_HERMES_REASONING_EFFORT
+    : (reasoningOptions.at(-1) ?? null);
+  const reasoningEffort = model.supportsReasoning
+    ? reasoningOptions.includes((settings.reasoningEffort ?? "") as HermesReasoningEffort)
+      ? ((settings.reasoningEffort ?? null) as HermesReasoningEffort)
+      : defaultReasoning
+    : null;
+  const fastModeEnabled = model.supportsFastMode
+    ? Boolean(
+        settings.fastModeEnabled ??
+          (model.id === DEFAULT_HERMES_MODEL_ID ? DEFAULT_HERMES_FAST_MODE_ENABLED : false),
+      )
+    : false;
+
+  return {
+    modelId: model.id,
+    reasoningEffort,
+    fastModeEnabled,
+  };
 }
 
 export function findHermesSlashCommands(draft: string): HermesSlashCommand[] {

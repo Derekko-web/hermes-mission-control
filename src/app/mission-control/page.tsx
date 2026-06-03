@@ -10,7 +10,7 @@ export const metadata: Metadata = {
 };
 
 export default async function MissionControlPage() {
-  await fetchMutation(api.tasks.ensureSeedData, {});
+  await fetchMutation(api.tasks.normalizeStatusesToNotionDefaults, {});
   const initialTasks = await fetchQuery(api.tasks.list, {});
 
   return <MissionControlApp tool="tasks" initialTasks={initialTasks} />;

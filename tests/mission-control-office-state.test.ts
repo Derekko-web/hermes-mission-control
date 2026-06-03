@@ -4,18 +4,10 @@ import test from "node:test";
 import { MISSION_CONTROL_TEMPLATE } from "../shared/missionControlTemplate";
 import {
   LIVE_ACTIVITY_WINDOW_MS,
+  type OfficeRosterEntry,
   buildLiveActivityEntries,
-  buildOfficeSceneMembers,
+  buildPixelOfficeAgents,
 } from "../src/components/mission-control/MissionControlOfficeState";
-
-const accentByTeamColor = {
-  amber: "amber",
-  cyan: "cyan",
-  emerald: "emerald",
-  indigo: "indigo",
-  rose: "rose",
-  violet: "violet",
-} as const;
 
 const now = Date.UTC(2026, 3, 20, 6, 57, 0);
 const [lead, , , writer, designer] = MISSION_CONTROL_TEMPLATE.operators;
@@ -41,14 +33,17 @@ test("keeps a fresh working operator at its assigned desk", () => {
         lastUpdatedAt: now - 5 * 60_000,
       },
     },
-  ] as const;
+  ] as unknown as readonly OfficeRosterEntry[];
 
-  const sceneMembers = buildOfficeSceneMembers(officeRoster, accentByTeamColor, now);
+  const agents = buildPixelOfficeAgents(officeRoster, now);
 
-  assert.equal(sceneMembers.length, 1);
-  assert.equal(sceneMembers[0]?.presenceMode, "desk");
-  assert.equal(sceneMembers[0]?.area, "south_station");
-  assert.equal(sceneMembers[0]?.showBubble, true);
+  assert.equal(agents.length, 1);
+  assert.equal(agents[0]?.id, 1);
+  assert.equal(agents[0]?.name, lead.label);
+  assert.equal(agents[0]?.statusLabel, "Working");
+  assert.equal(agents[0]?.activity, "Customize the portable workspace template");
+  assert.equal(agents[0]?.activeTool, "Mission Control");
+  assert.equal(agents[0]?.isActive, true);
 });
 
 test("converts stale desk presence into idle floor members without bubbles", () => {
@@ -72,14 +67,13 @@ test("converts stale desk presence into idle floor members without bubbles", () 
         lastUpdatedAt: now - LIVE_ACTIVITY_WINDOW_MS - 60_000,
       },
     },
-  ] as const;
+  ] as unknown as readonly OfficeRosterEntry[];
 
-  const sceneMembers = buildOfficeSceneMembers(officeRoster, accentByTeamColor, now);
+  const agents = buildPixelOfficeAgents(officeRoster, now);
 
-  assert.equal(sceneMembers.length, 1);
-  assert.equal(sceneMembers[0]?.presenceMode, "idle");
-  assert.equal(sceneMembers[0]?.showBubble, false);
-  assert.equal(sceneMembers[0]?.statusLabel, "Idle");
+  assert.equal(agents.length, 1);
+  assert.equal(agents[0]?.isActive, false);
+  assert.equal(agents[0]?.statusLabel, "Idle");
 });
 
 test("returns only fresh non-idle presence entries for live activity", () => {
@@ -141,7 +135,7 @@ test("returns only fresh non-idle presence entries for live activity", () => {
         lastUpdatedAt: now - 60_000,
       },
     },
-  ] as const;
+  ] as unknown as readonly OfficeRosterEntry[];
 
   const liveEntries = buildLiveActivityEntries(officeRoster, now);
 

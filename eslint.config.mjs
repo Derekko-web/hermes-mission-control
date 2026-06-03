@@ -11,6 +11,13 @@ const eslintConfig = defineConfig([
       "react-hooks/set-state-in-effect": "off",
     },
   },
+  {
+    files: ["src/components/mission-control/pixel-agents/**/*.{ts,tsx}"],
+    rules: {
+      "react-hooks/immutability": "off",
+      "react-hooks/refs": "off",
+    },
+  },
   globalIgnores([
     ".next/**",
     "out/**",

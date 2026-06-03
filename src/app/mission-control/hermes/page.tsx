@@ -10,8 +10,18 @@ export const metadata: Metadata = {
 };
 
 export default async function MissionControlHermesPage() {
+  await fetchMutation(api.teamMembers.ensureSeedData, {});
   await fetchMutation(api.hermesThreads.cleanupSeedData, {});
-  const initialThreads = await fetchQuery(api.hermesThreads.listThreads, {});
+  const [initialThreads, initialTeamMembers] = await Promise.all([
+    fetchQuery(api.hermesThreads.listThreads, {}),
+    fetchQuery(api.teamMembers.list, {}),
+  ]);
 
-  return <MissionControlApp tool="hermes" initialHermesThreads={initialThreads} />;
+  return (
+    <MissionControlApp
+      tool="hermes"
+      initialHermesThreads={initialThreads}
+      initialTeamMembers={initialTeamMembers}
+    />
+  );
 }

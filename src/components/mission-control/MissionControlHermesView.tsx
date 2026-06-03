@@ -2,21 +2,61 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, ClipboardEvent, FormEvent, KeyboardEvent } from "react";
-import { useMutation, useQuery } from "convex/react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { useQuery } from "convex/react";
 
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
 import { api } from "../../../convex/_generated/api";
 import { MissionControlHermesLayout } from "./MissionControlHermesLayout";
 import {
   applyHermesSlashCommand,
+  findHermesModelOption,
   findHermesSlashCommands,
   formatHermesAttachmentSize,
+  getHermesReasoningOptions,
+  HERMES_MODEL_OPTIONS,
+  normalizeHermesThreadSettings,
   type HermesLayoutAttachment,
   type HermesLayoutMessage,
+  type HermesOfficeAgentOption,
+  type HermesReasoningEffort,
 } from "./mission-control-hermes-shared";
 
 type HermesThreadDoc = Doc<"hermesThreads">;
 type HermesMessageDoc = Doc<"hermesMessages">;
+type TeamMemberDoc = Doc<"teamMembers">;
+
+type HermesSendResult = {
+  inserted: number;
+  threadId: Id<"hermesThreads"> | null;
+  userMessageId?: Id<"hermesMessages">;
+  assistantMessageId?: Id<"hermesMessages">;
+};
+
+type HermesSendRouteResponse = {
+  messages: HermesMessageDoc[];
+  sendResult: HermesSendResult;
+  threadId: Id<"hermesThreads">;
+  threads: HermesThreadDoc[];
+};
+
+type HermesCreateThreadRouteResponse = {
+  threadId: Id<"hermesThreads">;
+  threads: HermesThreadDoc[];
+};
+
+type HermesMessagesRouteResponse = {
+  messages: HermesMessageDoc[];
+};
+
+type HermesDeleteThreadRouteResponse = {
+  threads: HermesThreadDoc[];
+};
+
+type HermesUpdateSettingsRouteResponse = {
+  thread: HermesThreadDoc;
+  threads: HermesThreadDoc[];
+};
 
 type PendingHermesAttachment = HermesLayoutAttachment & {
   mimeType: string;
@@ -26,6 +66,7 @@ type PendingHermesAttachment = HermesLayoutAttachment & {
 
 const EMPTY_THREADS: HermesThreadDoc[] = [];
 const EMPTY_MESSAGES: HermesMessageDoc[] = [];
+const EMPTY_TEAM_MEMBERS: TeamMemberDoc[] = [];
 const MAX_ATTACHMENTS = 6;
 const MAX_IMAGE_BYTES = 2_000_000;
 
@@ -106,17 +147,121 @@ function mapMessageAttachment(message: HermesMessageDoc): HermesLayoutAttachment
   }));
 }
 
-export function MissionControlHermesView({ initialThreads }: { initialThreads: HermesThreadDoc[] }) {
+async function createHermesThreadViaServer(officeAgentId?: Id<"teamMembers"> | null) {
+  const response = await fetch("/api/mission-control/hermes/thread", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      officeAgentId: officeAgentId ?? undefined,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to create Hermes chat.");
+  }
+
+  return (await response.json()) as HermesCreateThreadRouteResponse;
+}
+
+async function updateHermesThreadSettingsViaServer(args: {
+  threadId: Id<"hermesThreads">;
+  modelId: string;
+  reasoningEffort: HermesReasoningEffort | null;
+  fastModeEnabled: boolean;
+  officeAgentId?: Id<"teamMembers"> | null;
+}) {
+  const response = await fetch(`/api/mission-control/hermes/thread/${args.threadId}`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      ...args,
+      officeAgentId: args.officeAgentId ?? undefined,
+    }),
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to update Hermes thread settings.");
+  }
+
+  return (await response.json()) as HermesUpdateSettingsRouteResponse;
+}
+
+async function deleteHermesThreadViaServer(threadId: Id<"hermesThreads">) {
+  const response = await fetch(`/api/mission-control/hermes/thread/${threadId}`, {
+    method: "DELETE",
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to delete Hermes chat.");
+  }
+
+  return (await response.json()) as HermesDeleteThreadRouteResponse;
+}
+
+async function fetchHermesMessagesViaServer(threadId: Id<"hermesThreads">) {
+  const response = await fetch(`/api/mission-control/hermes/thread/${threadId}/messages`);
+
+  if (!response.ok) {
+    throw new Error("Unable to load Hermes messages.");
+  }
+
+  return (await response.json()) as HermesMessagesRouteResponse;
+}
+
+async function sendHermesMessageViaServer(args: {
+  threadId?: Id<"hermesThreads">;
+  officeAgentId?: Id<"teamMembers"> | null;
+  content: string;
+  attachments: {
+    kind: "image" | "file";
+    name: string;
+    mimeType: string;
+    sizeBytes: number;
+    dataUrl?: string;
+  }[];
+}) {
+  const response = await fetch("/api/mission-control/hermes/send", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(args),
+  });
+
+  if (!response.ok) {
+    throw new Error("Unable to send Hermes message.");
+  }
+
+  return (await response.json()) as HermesSendRouteResponse;
+}
+
+export function MissionControlHermesView({
+  initialThreads,
+  initialTeamMembers,
+}: {
+  initialThreads: HermesThreadDoc[];
+  initialTeamMembers: TeamMemberDoc[];
+}) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const threadsQuery = useQuery(api.hermesThreads.listThreads);
-  const createThread = useMutation(api.hermesThreads.createThread);
-  const sendMessage = useMutation(api.hermesThreads.sendMessage);
-  const deleteThread = useMutation(api.hermesThreads.deleteThread);
+  const teamMembersQuery = useQuery(api.teamMembers.list);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  const threads = threadsQuery ?? initialThreads ?? EMPTY_THREADS;
   const [selectedThreadId, setSelectedThreadId] = useState<Id<"hermesThreads"> | null>(null);
+  const [selectedOfficeAgentId, setSelectedOfficeAgentId] = useState<Id<"teamMembers"> | null>(
+    () => initialTeamMembers[0]?._id ?? null,
+  );
   const [draft, setDraft] = useState("");
   const [pendingAttachments, setPendingAttachments] = useState<PendingHermesAttachment[]>([]);
+  const [fallbackThreads, setFallbackThreads] = useState<HermesThreadDoc[] | null>(null);
+  const [fallbackMessagesByThread, setFallbackMessagesByThread] = useState<Record<string, HermesMessageDoc[]>>({});
+  const [optimisticMessages, setOptimisticMessages] = useState<HermesLayoutMessage[]>([]);
+  const [streamingAssistantMessageId, setStreamingAssistantMessageId] = useState<string | null>(null);
   const [isSending, setIsSending] = useState(false);
 
   const messagesQuery = useQuery(
@@ -124,23 +269,133 @@ export function MissionControlHermesView({ initialThreads }: { initialThreads: H
     selectedThreadId ? { threadId: selectedThreadId } : "skip",
   );
 
-  const messages = messagesQuery ?? EMPTY_MESSAGES;
+  const threads = threadsQuery ?? fallbackThreads ?? initialThreads ?? EMPTY_THREADS;
+  const requestedThreadId = searchParams.get("thread") as Id<"hermesThreads"> | null;
+  const teamMembers = teamMembersQuery ?? initialTeamMembers ?? EMPTY_TEAM_MEMBERS;
+  const fallbackMessages = selectedThreadId ? (fallbackMessagesByThread[selectedThreadId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES;
+  const messages = messagesQuery ?? fallbackMessages;
   const activeThread = useMemo(
     () => threads.find((thread) => thread._id === selectedThreadId) ?? null,
     [selectedThreadId, threads],
   );
+  const activeThreadSettings = useMemo(
+    () =>
+      normalizeHermesThreadSettings({
+        modelId: activeThread?.modelId,
+        reasoningEffort: activeThread?.reasoningEffort ?? null,
+        fastModeEnabled: activeThread?.fastModeEnabled,
+      }),
+    [activeThread?.fastModeEnabled, activeThread?.modelId, activeThread?.reasoningEffort],
+  );
+  const [selectedModelId, setSelectedModelId] = useState(activeThreadSettings.modelId);
+  const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<HermesReasoningEffort | null>(
+    activeThreadSettings.reasoningEffort,
+  );
+  const [fastModeEnabled, setFastModeEnabled] = useState(activeThreadSettings.fastModeEnabled);
   const slashCommands = useMemo(() => findHermesSlashCommands(draft), [draft]);
+  const baseOfficeAgentOptions = useMemo<HermesOfficeAgentOption[]>(
+    () =>
+      teamMembers.map((member) => ({
+        id: member._id,
+        name: member.name,
+        roleTitle: member.roleTitle,
+      })),
+    [teamMembers],
+  );
+  const activeThreadOfficeAgentOption = useMemo<HermesOfficeAgentOption | null>(() => {
+    if (!activeThread?.officeAgentId) {
+      return null;
+    }
+
+    return {
+      id: activeThread.officeAgentId,
+      name: activeThread.officeAgentName ?? "Office agent",
+      roleTitle: activeThread.officeAgentRoleTitle ?? "Agent",
+    };
+  }, [activeThread]);
+  const officeAgentOptions = useMemo(() => {
+    if (
+      !activeThreadOfficeAgentOption ||
+      baseOfficeAgentOptions.some((agent) => agent.id === activeThreadOfficeAgentOption.id)
+    ) {
+      return baseOfficeAgentOptions;
+    }
+
+    return [...baseOfficeAgentOptions, activeThreadOfficeAgentOption];
+  }, [activeThreadOfficeAgentOption, baseOfficeAgentOptions]);
+  const officeAgentsById = useMemo(
+    () => new Map(officeAgentOptions.map((agent) => [agent.id, agent])),
+    [officeAgentOptions],
+  );
+  const defaultOfficeAgentId = (officeAgentOptions[0]?.id as Id<"teamMembers"> | undefined) ?? null;
+
+  useEffect(() => {
+    if (!requestedThreadId) {
+      return;
+    }
+
+    if (selectedThreadId === requestedThreadId) {
+      return;
+    }
+
+    const requestedThreadExists = threads.some((thread) => thread._id === requestedThreadId);
+    if (!requestedThreadExists) {
+      return;
+    }
+
+    setSelectedThreadId(requestedThreadId);
+    setDraft("");
+    setPendingAttachments([]);
+  }, [requestedThreadId, selectedThreadId, threads]);
 
   useEffect(() => {
     if (!selectedThreadId) {
       return;
     }
 
-    const stillExists = threads.some((thread) => thread._id === selectedThreadId);
+    const authoritativeThreads = threadsQuery ?? fallbackThreads ?? initialThreads ?? EMPTY_THREADS;
+    const stillExists = authoritativeThreads.some((thread) => thread._id === selectedThreadId);
     if (!stillExists) {
       setSelectedThreadId(null);
     }
-  }, [selectedThreadId, threads]);
+  }, [fallbackThreads, initialThreads, selectedThreadId, threadsQuery]);
+
+  useEffect(() => {
+    setSelectedOfficeAgentId(activeThread?.officeAgentId ?? defaultOfficeAgentId);
+  }, [activeThread?._id, activeThread?.officeAgentId, defaultOfficeAgentId]);
+
+  useEffect(() => {
+    if (!selectedThreadId) {
+      return;
+    }
+
+    if (messagesQuery) {
+      return;
+    }
+
+    if (selectedThreadId in fallbackMessagesByThread) {
+      return;
+    }
+
+    void (async () => {
+      const response = await fetchHermesMessagesViaServer(selectedThreadId);
+      setFallbackMessagesByThread((current) => ({
+        ...current,
+        [selectedThreadId]: response.messages,
+      }));
+    })();
+  }, [fallbackMessagesByThread, messagesQuery, selectedThreadId]);
+
+  useEffect(() => {
+    setSelectedModelId(activeThreadSettings.modelId);
+    setSelectedReasoningEffort(activeThreadSettings.reasoningEffort);
+    setFastModeEnabled(activeThreadSettings.fastModeEnabled);
+  }, [
+    activeThread?._id,
+    activeThreadSettings.fastModeEnabled,
+    activeThreadSettings.modelId,
+    activeThreadSettings.reasoningEffort,
+  ]);
 
   async function addPendingFiles(files: File[]) {
     if (files.length === 0) {
@@ -158,7 +413,105 @@ export function MissionControlHermesView({ initialThreads }: { initialThreads: H
     });
   }
 
-  async function handleSendMessage(event: FormEvent<HTMLFormElement>) {
+  async function persistThreadSettings(nextSettings: {
+    modelId: string;
+    reasoningEffort: HermesReasoningEffort | null;
+    fastModeEnabled: boolean;
+    officeAgentId?: Id<"teamMembers"> | null;
+  }) {
+    const normalized = normalizeHermesThreadSettings(nextSettings);
+    setSelectedModelId(normalized.modelId);
+    setSelectedReasoningEffort(normalized.reasoningEffort);
+    setFastModeEnabled(normalized.fastModeEnabled);
+    const officeAgentId = nextSettings.officeAgentId ?? selectedOfficeAgentId ?? defaultOfficeAgentId ?? undefined;
+
+    if (!selectedThreadId) {
+      return;
+    }
+
+    const response = await updateHermesThreadSettingsViaServer({
+      threadId: selectedThreadId,
+      modelId: normalized.modelId,
+      reasoningEffort: normalized.reasoningEffort,
+      fastModeEnabled: normalized.fastModeEnabled,
+      officeAgentId,
+    });
+
+    setFallbackThreads(response.threads);
+  }
+
+  async function handleOfficeAgentChange(officeAgentId: string) {
+    const typedOfficeAgentId = officeAgentId as Id<"teamMembers">;
+    setSelectedOfficeAgentId(typedOfficeAgentId);
+
+    if (!selectedThreadId) {
+      return;
+    }
+
+    await persistThreadSettings({
+      modelId: selectedModelId,
+      reasoningEffort: selectedReasoningEffort,
+      fastModeEnabled,
+      officeAgentId: typedOfficeAgentId,
+    });
+  }
+
+  function submitHermesMessage(content: string, attachments: PendingHermesAttachment[]) {
+    const attachmentsPayload = attachments.map((attachment) => ({
+      kind: attachment.kind,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      dataUrl: attachment.dataUrl,
+    }));
+    const optimisticMessage: HermesLayoutMessage = {
+      id: `optimistic-user-${Date.now()}`,
+      role: "user",
+      author: "You",
+      content,
+      createdAtLabel: "sending",
+      attachments: attachments.map((attachment) => ({
+        id: attachment.id,
+        kind: attachment.kind,
+        name: attachment.name,
+        sizeLabel: attachment.sizeLabel,
+        previewUrl: attachment.previewUrl,
+      })),
+    };
+
+    setOptimisticMessages([optimisticMessage]);
+    setStreamingAssistantMessageId(null);
+    setDraft("");
+    setPendingAttachments([]);
+    setIsSending(true);
+
+    const officeAgentId = selectedOfficeAgentId ?? defaultOfficeAgentId ?? undefined;
+    const threadId = selectedThreadId ?? undefined;
+
+    void (async () => {
+      try {
+        const response = await sendHermesMessageViaServer({
+          threadId,
+          officeAgentId,
+          content,
+          attachments: attachmentsPayload,
+        });
+
+        setFallbackThreads(response.threads);
+        setFallbackMessagesByThread((current) => ({
+          ...current,
+          [response.threadId]: response.messages,
+        }));
+        setSelectedThreadId(response.sendResult.threadId ?? null);
+        setStreamingAssistantMessageId(response.sendResult.assistantMessageId ?? null);
+      } finally {
+        setOptimisticMessages([]);
+        setIsSending(false);
+      }
+    })();
+  }
+
+  function handleSendMessage(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
     const content = draft.trim();
@@ -166,44 +519,43 @@ export function MissionControlHermesView({ initialThreads }: { initialThreads: H
       return;
     }
 
-    setIsSending(true);
+    submitHermesMessage(content, pendingAttachments);
+  }
 
-    try {
-      const result = await sendMessage({
-        threadId: selectedThreadId ?? undefined,
-        content,
-        attachments: pendingAttachments.map((attachment) => ({
-          kind: attachment.kind,
-          name: attachment.name,
-          mimeType: attachment.mimeType,
-          sizeBytes: attachment.sizeBytes,
-          dataUrl: attachment.dataUrl,
-        })),
-      });
-
-      setDraft("");
-      setPendingAttachments([]);
-      setSelectedThreadId(result.threadId ?? null);
-    } finally {
-      setIsSending(false);
+  function handleVoiceMessageSubmit(message: string) {
+    if (isSending) {
+      return;
     }
+
+    submitHermesMessage(message, []);
   }
 
   async function handleDeleteThread(threadId: string) {
     const typedThreadId = threadId as Id<"hermesThreads">;
+    const response = await deleteHermesThreadViaServer(typedThreadId);
+
     if (typedThreadId === selectedThreadId) {
       setSelectedThreadId(null);
+      setStreamingAssistantMessageId(null);
       setDraft("");
       setPendingAttachments([]);
     }
 
-    await deleteThread({ threadId: typedThreadId });
+    setFallbackThreads(response.threads);
+    setFallbackMessagesByThread((current) => {
+      const next = { ...current };
+      delete next[typedThreadId];
+      return next;
+    });
   }
 
   function handleThreadSelect(threadId: string) {
-    setSelectedThreadId(threadId as Id<"hermesThreads">);
+    const typedThreadId = threadId as Id<"hermesThreads">;
+    setStreamingAssistantMessageId(null);
+    setSelectedThreadId(typedThreadId);
     setDraft("");
     setPendingAttachments([]);
+    router.replace(`/mission-control/hermes?thread=${typedThreadId}`);
   }
 
   function handleDraftKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
@@ -243,6 +595,12 @@ export function MissionControlHermesView({ initialThreads }: { initialThreads: H
     createdAtLabel: formatRelativeTime(message.createdAt),
     attachments: mapMessageAttachment(message),
   }));
+  const displayedMessages = optimisticMessages.length > 0 ? [...mappedMessages, ...optimisticMessages] : mappedMessages;
+  const selectedModel = findHermesModelOption(selectedModelId);
+  const availableReasoningOptions = getHermesReasoningOptions(selectedModelId);
+  const showReasoningControl = selectedModel.supportsReasoning;
+  const showFastModeToggle = selectedModel.supportsFastMode;
+  const selectedOfficeAgent = selectedOfficeAgentId ? officeAgentsById.get(selectedOfficeAgentId) : null;
 
   return (
     <>
@@ -251,22 +609,78 @@ export function MissionControlHermesView({ initialThreads }: { initialThreads: H
           id: thread._id,
           title: thread.title,
           active: thread._id === selectedThreadId,
+          officeAgentName:
+            (thread.officeAgentId ? officeAgentsById.get(thread.officeAgentId)?.name : null) ??
+            thread.officeAgentName,
+          officeAgentRoleTitle:
+            (thread.officeAgentId ? officeAgentsById.get(thread.officeAgentId)?.roleTitle : null) ??
+            thread.officeAgentRoleTitle,
         }))}
         activeThreadTitle={activeThread?.title ?? null}
-        messages={mappedMessages}
+        officeAgents={officeAgentOptions}
+        selectedOfficeAgentId={selectedOfficeAgent?.id ?? selectedOfficeAgentId ?? ""}
+        messages={displayedMessages}
         draft={draft}
         pendingAttachments={pendingAttachments}
         slashCommands={slashCommands}
+        selectedModelId={selectedModelId}
+        selectedReasoningEffort={selectedReasoningEffort}
+        fastModeEnabled={fastModeEnabled}
+        availableModels={HERMES_MODEL_OPTIONS}
+        availableReasoningOptions={availableReasoningOptions}
+        showReasoningControl={showReasoningControl}
+        showFastModeToggle={showFastModeToggle}
+        settingsDisabled={selectedThreadId === null}
         isSending={isSending}
+        streamingAssistantMessageId={streamingAssistantMessageId}
+        onModelChange={(modelId) => {
+          void persistThreadSettings({
+            modelId,
+            reasoningEffort: selectedReasoningEffort,
+            fastModeEnabled,
+          });
+        }}
+        onReasoningChange={(reasoningEffort) => {
+          void persistThreadSettings({
+            modelId: selectedModelId,
+            reasoningEffort,
+            fastModeEnabled,
+          });
+        }}
+        onFastModeToggle={() => {
+          void persistThreadSettings({
+            modelId: selectedModelId,
+            reasoningEffort: selectedReasoningEffort,
+            fastModeEnabled: !fastModeEnabled,
+          });
+        }}
+        onAssistantResponseRevealComplete={(messageId) => {
+          setStreamingAssistantMessageId((current) => (current === messageId ? null : current));
+        }}
         onNewChat={() => {
           void (async () => {
+            const defaults = normalizeHermesThreadSettings({});
+            const officeAgentId = selectedOfficeAgentId ?? defaultOfficeAgentId ?? undefined;
             setDraft("");
             setPendingAttachments([]);
-            const createdThread = await createThread({});
+            setStreamingAssistantMessageId(null);
+            setSelectedModelId(defaults.modelId);
+            setSelectedReasoningEffort(defaults.reasoningEffort);
+            setFastModeEnabled(defaults.fastModeEnabled);
+            const createdThread = await createHermesThreadViaServer(officeAgentId);
+            setFallbackThreads(createdThread.threads);
+            setFallbackMessagesByThread((current) => ({
+              ...current,
+              [createdThread.threadId]: [],
+            }));
             setSelectedThreadId(createdThread.threadId);
+            setSelectedOfficeAgentId(officeAgentId ?? null);
           })();
         }}
         onThreadSelect={handleThreadSelect}
+        onOfficeAgentChange={(officeAgentId) => {
+          void handleOfficeAgentChange(officeAgentId);
+        }}
         onThreadDelete={(threadId) => {
           void handleDeleteThread(threadId);
         }}
@@ -276,11 +690,17 @@ export function MissionControlHermesView({ initialThreads }: { initialThreads: H
           void handleDraftPaste(event);
         }}
         onAttachClick={() => fileInputRef.current?.click()}
+        onFilesDrop={(files) => {
+          void addPendingFiles(files);
+        }}
         onRemovePendingAttachment={(attachmentId) => {
           setPendingAttachments((current) => current.filter((attachment) => attachment.id !== attachmentId));
         }}
         onSlashCommandSelect={(command) => {
           setDraft(applyHermesSlashCommand(draft, command));
+        }}
+        onVoiceMessageSubmit={(message) => {
+          void handleVoiceMessageSubmit(message);
         }}
         onSubmit={handleSendMessage}
       />

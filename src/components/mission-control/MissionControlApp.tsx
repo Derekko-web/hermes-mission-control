@@ -5,7 +5,6 @@ import { MissionControlHermesView } from "@/components/mission-control/MissionCo
 import { MissionControlMemoryView } from "@/components/mission-control/MissionControlMemoryView";
 import { MissionControlOfficeView } from "@/components/mission-control/MissionControlOfficeView";
 import { MissionControlShell } from "@/components/mission-control/MissionControlShell";
-import { MissionControlTeamView } from "@/components/mission-control/MissionControlTeamView";
 import { MissionControlTasksView } from "@/components/mission-control/MissionControlTasksView";
 
 type MissionControlAppProps = {
@@ -31,7 +30,10 @@ export function MissionControlApp({
     tool === "calendar" ? (
       <MissionControlCalendarView initialScheduledItems={initialScheduledItems ?? []} />
     ) : tool === "hermes" ? (
-      <MissionControlHermesView initialThreads={initialHermesThreads ?? []} />
+      <MissionControlHermesView
+        initialThreads={initialHermesThreads ?? []}
+        initialTeamMembers={initialTeamMembers ?? []}
+      />
     ) : tool === "memory" ? (
       <MissionControlMemoryView initialMemories={initialMemories ?? []} />
     ) : tool === "office" ? (
@@ -39,8 +41,6 @@ export function MissionControlApp({
         initialTeamMembers={initialTeamMembers ?? []}
         initialOfficePresence={initialOfficePresence ?? []}
       />
-    ) : tool === "team" ? (
-      <MissionControlTeamView initialTeamMembers={initialTeamMembers ?? []} />
     ) : (
       <MissionControlTasksView initialTasks={initialTasks ?? []} />
     );

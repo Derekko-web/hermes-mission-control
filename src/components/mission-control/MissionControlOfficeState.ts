@@ -1,5 +1,5 @@
 import type { Doc } from "../../../convex/_generated/dataModel";
-import type { OfficeAccent, OfficeSceneMember } from "./MissionControlOfficeLayout";
+import type { PixelOfficeAgent } from "./mission-control-office-types";
 
 export type TeamMemberDoc = Doc<"teamMembers">;
 export type OfficePresenceDoc = Doc<"officePresence">;
@@ -7,8 +7,6 @@ export type OfficeRosterEntry = {
   member: TeamMemberDoc;
   presence: OfficePresenceDoc | null;
 };
-
-export type AccentByTeamColor = Record<TeamMemberDoc["color"], OfficeAccent>;
 
 const STATUS_LABELS: Record<OfficePresenceDoc["status"], string> = {
   working: "Working",
@@ -28,34 +26,26 @@ export function isLiveOfficePresence(
   return presence.status !== "idle" && now - presence.lastUpdatedAt <= LIVE_ACTIVITY_WINDOW_MS;
 }
 
-export function buildOfficeSceneMembers(
+export function buildPixelOfficeAgents(
   officeRoster: readonly OfficeRosterEntry[],
-  accentByTeamColor: AccentByTeamColor,
   now = Date.now(),
-): OfficeSceneMember[] {
-  return officeRoster.flatMap(({ member, presence }) => {
-    if (!presence) {
-      return [];
-    }
+): PixelOfficeAgent[] {
+  return officeRoster.map(({ member, presence }, index) => {
+    const isLive = presence ? isLiveOfficePresence(presence, now) : false;
+    const isActive = Boolean(presence && isLive && presence.status !== "idle");
+    const activity = presence?.currentTask ?? "Standing by";
+    const activeTool = presence?.activeTool ?? "Mission Control";
 
-    const isLive = isLiveOfficePresence(presence, now);
-    const presenceMode = isLive && presence.isAtDesk ? "desk" : "idle";
-
-    return [
-      {
-        id: String(presence._id),
-        name: member.name,
-        roleTitle: member.roleTitle,
-        area: presence.area,
-        statusLabel: isLive ? STATUS_LABELS[presence.status] : STATUS_LABELS.idle,
-        currentTask: presence.currentTask ?? "Standing by",
-        activeTool: presence.activeTool ?? "Mission Control",
-        accent: accentByTeamColor[member.color],
-        avatarLabel: member.avatarLabel,
-        presenceMode,
-        showBubble: presenceMode === "desk" && Boolean(presence.currentTask),
-      },
-    ];
+    return {
+      id: member.sortOrder + 1 || index + 1,
+      memberId: String(member._id),
+      name: member.name,
+      roleTitle: member.roleTitle,
+      statusLabel: presence && isLive ? STATUS_LABELS[presence.status] : STATUS_LABELS.idle,
+      activity,
+      activeTool,
+      isActive,
+    };
   });
 }
 

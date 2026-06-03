@@ -319,14 +319,6 @@ export const MISSION_CONTROL_TEMPLATE = {
 
 export const TASK_ASSIGNEE_OPTIONS = [
   IDENTITY_META.you,
-  ...MISSION_CONTROL_TEMPLATE.operators.map((operator) => ({
-    id: operator.id,
-    label: operator.label,
-    avatarLabel: operator.avatarLabel,
-    color: operator.color,
-    avatarClassName: accentClassName(operator.color),
-    avatarText: operator.avatarLabel,
-  })),
   IDENTITY_META.unassigned,
 ] as const satisfies readonly TemplateIdentityMeta[];
 
@@ -422,8 +414,8 @@ export function buildStarterTasks(now = Date.now()) {
     {
       title: "Map the local Hermes environment",
       description: "Inspect repo boundaries and confirm which values should live in the shared template config.",
-      status: "done" as const,
-      assignee: "architect",
+      status: "Done" as const,
+      assignee: "you",
       priority: "high" as const,
       project: MISSION_CONTROL_TEMPLATE.workspaceTitle,
       createdBy: "system",
@@ -431,10 +423,10 @@ export function buildStarterTasks(now = Date.now()) {
       updatedAt: now - 1000 * 60 * 6,
     },
     {
-      title: "Customize the operator roster",
-      description: "Rename the starter operators in shared/missionControlTemplate.ts to match the local Hermes workflow.",
-      status: "in_progress" as const,
-      assignee: "lead",
+      title: "Customize the workspace",
+      description: "Update the starter workspace labels, tasks, schedules, and notes to match the local workflow.",
+      status: "In progress" as const,
+      assignee: "you",
       priority: "high" as const,
       project: MISSION_CONTROL_TEMPLATE.workspaceTitle,
       createdBy: "system",
@@ -444,8 +436,8 @@ export function buildStarterTasks(now = Date.now()) {
     {
       title: "Wire recurring jobs into Calendar",
       description: "Track real local cron jobs and recurring routines so the schedule is visible in one place.",
-      status: "backlog" as const,
-      assignee: "builder",
+      status: "Not started" as const,
+      assignee: "you",
       priority: "medium" as const,
       project: MISSION_CONTROL_TEMPLATE.workspaceTitle,
       createdBy: "system",
@@ -455,8 +447,8 @@ export function buildStarterTasks(now = Date.now()) {
     {
       title: "Document local operating notes in Memory",
       description: "Capture durable setup decisions, workflow rules, and repo-specific context in searchable memory entries.",
-      status: "backlog" as const,
-      assignee: "writer",
+      status: "Not started" as const,
+      assignee: "you",
       priority: "medium" as const,
       project: MISSION_CONTROL_TEMPLATE.workspaceTitle,
       createdBy: "system",
@@ -465,9 +457,9 @@ export function buildStarterTasks(now = Date.now()) {
     },
     {
       title: "Polish the workspace shell for handoff",
-      description: "Keep the template visually tight after local labels, operators, and schedules are customized.",
-      status: "backlog" as const,
-      assignee: "designer",
+      description: "Keep the workspace visually tight after local labels, tasks, and schedules are customized.",
+      status: "Not started" as const,
+      assignee: "you",
       priority: "medium" as const,
       project: MISSION_CONTROL_TEMPLATE.workspaceTitle,
       createdBy: "system",
@@ -656,13 +648,9 @@ export function buildTemplateOfficePresence(now = Date.now()) {
 }
 
 export function inferTemplateAssignee(title: string, description?: string) {
-  const haystack = `${title} ${description ?? ""}`.toLowerCase();
-  for (const operator of MISSION_CONTROL_TEMPLATE.operators.filter((candidate) => candidate.id !== MISSION_CONTROL_TEMPLATE.primaryOperator.id)) {
-    if (operator.keywordHints.some((hint) => haystack.includes(hint))) {
-      return operator.id;
-    }
-  }
-  return MISSION_CONTROL_TEMPLATE.primaryOperator.id;
+  void title;
+  void description;
+  return IDENTITY_META.you.id;
 }
 
 export function getLeadLabel() {

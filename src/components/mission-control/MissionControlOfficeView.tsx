@@ -5,12 +5,13 @@ import { useQuery } from "convex/react";
 
 import type { Doc } from "../../../convex/_generated/dataModel";
 import { api } from "../../../convex/_generated/api";
-import { type OfficeActivityItem, MissionControlOfficeLayout } from "./MissionControlOfficeLayout";
+import { MissionControlOfficeLayout } from "./MissionControlOfficeLayout";
 import {
   type TeamMemberDoc,
   buildLiveActivityEntries,
-  buildOfficeSceneMembers,
+  buildPixelOfficeAgents,
 } from "./MissionControlOfficeState";
+import type { OfficeActivityItem } from "./mission-control-office-types";
 
 type OfficePresenceDoc = Doc<"officePresence">;
 
@@ -38,15 +39,6 @@ const AREA_LABELS: Record<OfficeSceneArea, string> = {
   northeast_station: "Northeast station",
   lounge: "Lounge",
 };
-
-const ACCENT_BY_TEAM_COLOR = {
-  amber: "amber",
-  cyan: "cyan",
-  emerald: "emerald",
-  indigo: "indigo",
-  rose: "rose",
-  violet: "violet",
-} as const;
 
 const relativeTimeFormat = new Intl.RelativeTimeFormat("en", { numeric: "auto" });
 
@@ -98,10 +90,7 @@ export function MissionControlOfficeView({
       .sort((left, right) => left.member.sortOrder - right.member.sortOrder);
   }, [officePresence, teamMembers]);
 
-  const sceneMembers = useMemo(
-    () => buildOfficeSceneMembers(officeRoster, ACCENT_BY_TEAM_COLOR, now),
-    [now, officeRoster],
-  );
+  const agents = useMemo(() => buildPixelOfficeAgents(officeRoster, now), [now, officeRoster]);
 
   const activityItems = useMemo<OfficeActivityItem[]>(() => {
     return buildLiveActivityEntries(officeRoster, now).map(({ member, presence }) => ({
@@ -117,7 +106,7 @@ export function MissionControlOfficeView({
     <MissionControlOfficeLayout
       title="The Office"
       subtitle="Mission Control headquarters"
-      sceneMembers={sceneMembers}
+      agents={agents}
       activityTitle="Live Activity"
       activityItems={activityItems}
     />

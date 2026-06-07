@@ -5,7 +5,6 @@ import { POST } from "../src/app/api/mission-control/notion/webhook/route";
 
 const originalFetch = globalThis.fetch;
 const originalAutomationSecret = process.env.MISSION_CONTROL_NOTION_AUTOMATION_SECRET;
-const originalInternalBaseUrl = process.env.MISSION_CONTROL_INTERNAL_BASE_URL;
 const originalVerificationToken = process.env.NOTION_WEBHOOK_VERIFICATION_TOKEN;
 
 afterEach(() => {
@@ -17,12 +16,6 @@ afterEach(() => {
     process.env.MISSION_CONTROL_NOTION_AUTOMATION_SECRET = originalAutomationSecret;
   }
 
-  if (originalInternalBaseUrl === undefined) {
-    delete process.env.MISSION_CONTROL_INTERNAL_BASE_URL;
-  } else {
-    process.env.MISSION_CONTROL_INTERNAL_BASE_URL = originalInternalBaseUrl;
-  }
-
   if (originalVerificationToken === undefined) {
     delete process.env.NOTION_WEBHOOK_VERIFICATION_TOKEN;
   } else {
@@ -30,10 +23,9 @@ afterEach(() => {
   }
 });
 
-test("database automation webhook with the Mission Control secret triggers Notion sync", async () => {
+test("database automation webhook with the Mission Control secret defers to manual Notion sync", async () => {
   const fetchCalls: Array<{ input: string; init?: RequestInit }> = [];
 
-  process.env.MISSION_CONTROL_INTERNAL_BASE_URL = "http://mission-control.internal";
   process.env.MISSION_CONTROL_NOTION_AUTOMATION_SECRET = "test-automation-secret";
   process.env.NOTION_WEBHOOK_VERIFICATION_TOKEN = "official-webhook-token";
 
@@ -61,9 +53,9 @@ test("database automation webhook with the Mission Control secret triggers Notio
 
   assert.equal(response.status, 200);
   assert.equal(payload.ok, true);
-  assert.equal(fetchCalls.length, 1);
-  assert.equal(fetchCalls[0]?.input, "http://mission-control.internal/api/mission-control/notion/sync");
-  assert.equal(fetchCalls[0]?.init?.method, "POST");
+  assert.equal(payload.syncDeferred, true);
+  assert.equal(payload.manualSyncRequired, true);
+  assert.equal(fetchCalls.length, 0);
 });
 
 test("database automation webhook without the Mission Control secret cannot bypass Notion signature checks", async () => {

@@ -3,8 +3,7 @@
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { useRouter } from "next/navigation";
-import { Bot, ExternalLink, Loader, Play, Search, X } from "lucide-react";
+import { Bot, ExternalLink, Loader, Pencil, Play, Plus, RefreshCw, Save, Search, X } from "lucide-react";
 import { useMutation, useQuery } from "convex/react";
 
 import type { Doc, Id } from "../../../convex/_generated/dataModel";
@@ -39,6 +38,22 @@ type TaskMutationRouteResponse = {
   archivedRemote?: boolean;
   error?: string;
 };
+type NotionTaskSyncRouteResponse = {
+  removedTaskIds?: Id<"tasks">[];
+  summary?: NotionTaskSyncSummary;
+  error?: string;
+};
+type NotionTaskSyncSummary = {
+  createdInMissionControl?: number;
+  createdInNotion?: number;
+  deletedFromMissionControl?: number;
+  pulledFromNotion?: number;
+  pushedToNotion?: number;
+  linked?: number;
+  conflicts?: number;
+  skippedMissingRemote?: number;
+  bodyReadFailures?: number;
+};
 type TaskMutationResult =
   | {
       kind: "saved";
@@ -64,8 +79,26 @@ type TaskCardContentProps = {
   task: TaskDoc;
   isLaunchPromptOpen: boolean;
   isLaunching: boolean;
+  onEdit: () => void;
+  onCreateHermesThread: () => void;
   onRunHermes: () => void;
   onDismissLaunchPrompt: () => void;
+};
+type TaskEditorDraft = {
+  mode: "create" | "edit";
+  taskId?: Id<"tasks">;
+  title: string;
+  description: string;
+  status: TaskStatus;
+  priority: TaskPriority;
+  project: string;
+};
+type TaskEditorDialogProps = {
+  draft: TaskEditorDraft | null;
+  isSaving: boolean;
+  onChange: (draft: TaskEditorDraft) => void;
+  onClose: () => void;
+  onSave: () => void;
 };
 type DragTarget = {
   status: TaskStatus;
@@ -102,6 +135,11 @@ const STATUS_META: Record<
     dotClassName: "bg-indigo-400",
     emptyLabel: "No tasks",
   },
+  "In review": {
+    label: "In review",
+    dotClassName: "bg-amber-300",
+    emptyLabel: "No tasks",
+  },
   Done: {
     label: "Done",
     dotClassName: "bg-emerald-400",
@@ -134,10 +172,10 @@ const PRIORITY_META: Record<
   },
 };
 
-const AUTO_START_STORAGE_KEY = "mission-control.auto-start-hermes-on-in-progress";
+const AUTO_LINK_STORAGE_KEY = "mission-control.auto-link-hermes-on-in-progress";
 const TASK_MUTATION_TIMEOUT_MS = 8000;
-const NOTION_AUTO_SYNC_INTERVAL_MS = 30_000;
-const NOTION_AUTO_SYNC_TIMEOUT_MS = 20_000;
+const HERMES_THREAD_CREATE_TIMEOUT_MS = 8000;
+const NOTION_SYNC_TIMEOUT_MS = 20_000;
 
 function matchesSearch(task: TaskDoc, deferredSearch: string) {
   if (!deferredSearch) {
@@ -156,6 +194,69 @@ function matchesSearch(task: TaskDoc, deferredSearch: string) {
     .toLowerCase();
 
   return haystack.includes(deferredSearch);
+}
+
+function trimOptionalText(value: string) {
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
+function taskDescriptionForEditor(task: TaskDoc) {
+  return task.description ?? task.notionBodyText ?? "";
+}
+
+function taskCardPreview(task: TaskDoc) {
+  return task.description?.trim() || task.notionBodyText?.trim() || "";
+}
+
+function createTaskEditorDraft(status: TaskStatus = "Not started"): TaskEditorDraft {
+  return {
+    mode: "create",
+    title: "",
+    description: "",
+    status,
+    priority: "medium",
+    project: "",
+  };
+}
+
+function editTaskEditorDraft(task: TaskDoc): TaskEditorDraft {
+  return {
+    mode: "edit",
+    taskId: task._id,
+    title: task.title,
+    description: taskDescriptionForEditor(task),
+    status: toMissionControlTaskStatus(task.status),
+    priority: task.priority,
+    project: task.project ?? "",
+  };
+}
+
+function taskEditorPayload(draft: TaskEditorDraft) {
+  return {
+    title: draft.title.trim(),
+    description: draft.description,
+    status: draft.status,
+    priority: draft.priority,
+    project: draft.project,
+  };
+}
+
+function formatNotionSyncSummary(summary: NotionTaskSyncSummary | undefined) {
+  if (!summary) {
+    return "Notion sync complete.";
+  }
+
+  const parts = [
+    summary.createdInNotion ? `${summary.createdInNotion} created in Notion` : "",
+    summary.createdInMissionControl ? `${summary.createdInMissionControl} imported` : "",
+    summary.pushedToNotion ? `${summary.pushedToNotion} pushed` : "",
+    summary.pulledFromNotion ? `${summary.pulledFromNotion} pulled` : "",
+    summary.deletedFromMissionControl ? `${summary.deletedFromMissionControl} removed` : "",
+    summary.conflicts ? `${summary.conflicts} conflicts` : "",
+  ].filter(Boolean);
+
+  return parts.length > 0 ? `Notion sync complete: ${parts.join(", ")}.` : "Notion sync complete. No changes.";
 }
 
 export function buildHermesTaskPrompt(task: TaskDoc) {
@@ -181,17 +282,24 @@ export function buildHermesTaskRunPrompt(task: TaskDoc) {
     "",
     "Mission Control card rule:",
     "- Do not edit, replace, summarize, append to, or otherwise rewrite the Kanban card description or Notion page body.",
-    "- Do not change the card status, move the card to Done, update the Kanban column, or change the Notion status.",
-    "- The user will review your work and manually drag the card to Done when they decide it is complete.",
+    "- Do not move the card to Done, update the Kanban column yourself, or change the Notion status directly.",
+    "- When you finish, Mission Control will move this card from In progress to In review automatically.",
+    "- The user will review your work and manually drag the card from In review to Done when they decide it is complete.",
     "- Keep progress notes, blocker notes, completion notes, and follow-up questions inside this Hermes thread.",
     "- Do the requested work using the available tools, then reply in this thread with the outcome for review.",
   ].join("\n");
 }
 
+export function buildHermesTaskOfficeActivity(task: Pick<TaskDoc, "title">) {
+  const title = task.title.trim();
+  return title ? `Working on ${title}` : "Working on a Mission Control task";
+}
+
 export function resolveHermesTaskOperatorAgent(
-  task: Pick<TaskDoc, "_id" | "operatorAgentId">,
-  tasks: readonly Pick<TaskDoc, "_id" | "status" | "hermesThreadId" | "operatorAgentId">[],
+  task: { _id: string; operatorAgentId?: Id<"teamMembers"> | null },
+  tasks: readonly { _id: string; status: string; hermesThreadId?: Id<"hermesThreads">; operatorAgentId?: Id<"teamMembers"> | null }[],
   teamMembers: readonly TaskOperatorAgent[],
+  random = Math.random,
 ) {
   const orderedAgents = [...teamMembers].sort((left, right) => left.sortOrder - right.sortOrder);
   if (orderedAgents.length === 0) {
@@ -215,10 +323,7 @@ export function resolveHermesTaskOperatorAgent(
     }
 
     const status = toMissionControlTaskStatus(candidateTask.status);
-    if (status !== "In progress" && !candidateTask.hermesThreadId) {
-      continue;
-    }
-    if (status === "Done") {
+    if (status !== "In progress") {
       continue;
     }
 
@@ -228,10 +333,10 @@ export function resolveHermesTaskOperatorAgent(
     );
   }
 
-  return orderedAgents.sort((left, right) => {
-    const loadDelta = (activeWorkByAgentId.get(left._id) ?? 0) - (activeWorkByAgentId.get(right._id) ?? 0);
-    return loadDelta || left.sortOrder - right.sortOrder;
-  })[0];
+  const leastBusyLoad = Math.min(...orderedAgents.map((agent) => activeWorkByAgentId.get(agent._id) ?? 0));
+  const leastBusyAgents = orderedAgents.filter((agent) => (activeWorkByAgentId.get(agent._id) ?? 0) === leastBusyLoad);
+  const randomIndex = Math.min(leastBusyAgents.length - 1, Math.floor(random() * leastBusyAgents.length));
+  return leastBusyAgents[randomIndex];
 }
 
 export function mergeMissionControlTaskSnapshots<T extends { _id: string; updatedAt: number }>(
@@ -244,11 +349,18 @@ export function mergeMissionControlTaskSnapshots<T extends { _id: string; update
 
   const optimisticTasksById = new Map(optimisticTasks.map((task) => [task._id, task]));
   return serverTasks
-    .map((task) => optimisticTasksById.get(task._id) ?? task)
+    .map((task) => {
+      const optimisticTask = optimisticTasksById.get(task._id);
+      if (!optimisticTask) {
+        return task;
+      }
+
+      return optimisticTask.updatedAt > task.updatedAt ? optimisticTask : task;
+    })
     .sort((left, right) => right.updatedAt - left.updatedAt);
 }
 
-async function mutateTaskViaServer(method: "PATCH", body: Record<string, unknown>): Promise<TaskMutationResult> {
+async function mutateTaskViaServer(method: "POST" | "PATCH", body: Record<string, unknown>): Promise<TaskMutationResult> {
   const controller = new AbortController();
   const timeout = window.setTimeout(() => controller.abort(), TASK_MUTATION_TIMEOUT_MS);
 
@@ -294,18 +406,23 @@ async function mutateTaskViaServer(method: "PATCH", body: Record<string, unknown
 
 async function syncNotionTasksViaServer() {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), NOTION_AUTO_SYNC_TIMEOUT_MS);
+  const timeout = window.setTimeout(() => controller.abort(), NOTION_SYNC_TIMEOUT_MS);
 
   try {
     const response = await fetch("/api/mission-control/notion/sync", {
       method: "POST",
       signal: controller.signal,
     });
-    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    const payload = (await response.json().catch(() => null)) as NotionTaskSyncRouteResponse | null;
 
     if (!response.ok) {
       throw new Error(payload?.error ?? "Unable to sync Notion tasks.");
     }
+
+    return {
+      removedTaskIds: Array.isArray(payload?.removedTaskIds) ? payload.removedTaskIds : [],
+      summary: payload?.summary,
+    };
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
       throw new Error("Notion sync timed out.");
@@ -317,32 +434,51 @@ async function syncNotionTasksViaServer() {
   }
 }
 
+export function formatNotionSyncError(error: unknown) {
+  const message = error instanceof Error ? error.message : "Unknown error";
+  return `Notion sync failed: ${message}`;
+}
+
 async function readHermesRouteError(response: Response, fallbackMessage: string) {
   const payload = (await response.json().catch(() => null)) as { error?: string } | null;
   return payload?.error ?? fallbackMessage;
 }
 
 async function createHermesThreadForTask(officeAgentId?: Id<"teamMembers"> | null) {
-  const response = await fetch("/api/mission-control/hermes/thread", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      officeAgentId: officeAgentId ?? undefined,
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), HERMES_THREAD_CREATE_TIMEOUT_MS);
 
-  if (!response.ok) {
-    throw new Error(await readHermesRouteError(response, "Unable to create Hermes thread."));
+  try {
+    const response = await fetch("/api/mission-control/hermes/thread", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        officeAgentId: officeAgentId ?? undefined,
+      }),
+      signal: controller.signal,
+    });
+
+    if (!response.ok) {
+      throw new Error(await readHermesRouteError(response, "Unable to create Hermes thread."));
+    }
+
+    const payload = (await response.json()) as HermesCreateThreadRouteResponse;
+    if (!payload.threadId) {
+      throw new Error("Unable to create Hermes thread.");
+    }
+
+    return payload;
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error("Creating the Hermes thread timed out.");
+    }
+
+    throw error;
+  } finally {
+    window.clearTimeout(timeout);
   }
-
-  const payload = (await response.json()) as HermesCreateThreadRouteResponse;
-  if (!payload.threadId) {
-    throw new Error("Unable to create Hermes thread.");
-  }
-
-  return payload;
 }
 
 async function sendHermesTaskPromptInThread({
@@ -350,11 +486,13 @@ async function sendHermesTaskPromptInThread({
   taskId,
   officeAgentId,
   content,
+  officeActivity,
 }: {
   threadId: Id<"hermesThreads">;
   taskId: Id<"tasks">;
   officeAgentId?: Id<"teamMembers">;
   content: string;
+  officeActivity?: string;
 }) {
   const response = await fetch("/api/mission-control/hermes/send", {
     method: "POST",
@@ -367,6 +505,7 @@ async function sendHermesTaskPromptInThread({
       content,
       attachments: [],
       officeAgentId,
+      officeActivity,
       recordUserMessage: false,
     }),
   });
@@ -388,7 +527,7 @@ function TaskColumnDropZone({ status, isActive, children }: TaskColumnDropZonePr
   return (
     <div
       data-task-column={status}
-      className={`mt-4 flex flex-1 flex-col gap-3 rounded-2xl transition-[background-color,box-shadow] duration-200 ${
+      className={`mt-3 flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto rounded-[14px] px-1 pb-1 transition-[background-color,box-shadow] duration-200 ${
         isActive ? "bg-white/[0.025] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.055)]" : "bg-transparent"
       }`}
     >
@@ -417,13 +556,15 @@ function TaskCardContent({
   task,
   isLaunchPromptOpen,
   isLaunching,
+  onEdit,
+  onCreateHermesThread,
   onRunHermes,
   onDismissLaunchPrompt,
 }: TaskCardContentProps) {
   const isInProgress = toMissionControlTaskStatus(task.status) === "In progress";
-  const operatorAgentName = task.operatorAgentName?.trim();
-  const operatorAgentRoleTitle = task.operatorAgentRoleTitle?.trim();
   const priorityMeta = PRIORITY_META[task.priority];
+  const previewText = taskCardPreview(task);
+  const project = task.project?.trim();
 
   return (
     <>
@@ -434,7 +575,20 @@ function TaskCardContent({
             {priorityMeta.label}
           </p>
           <h4 className="text-[1rem] font-semibold leading-snug text-zinc-50">{task.title}</h4>
+          {previewText ? (
+            <p className="mt-2 max-h-16 overflow-hidden text-sm leading-5 text-zinc-400">{previewText}</p>
+          ) : null}
         </div>
+        <button
+          type="button"
+          data-no-card-drag
+          onClick={onEdit}
+          className="inline-flex h-8 w-8 flex-none items-center justify-center rounded-[10px] border border-white/8 bg-white/[0.03] text-zinc-500 opacity-100 transition hover:border-white/14 hover:bg-white/[0.06] hover:text-zinc-100 active:scale-95 sm:opacity-0 sm:group-hover:opacity-100"
+          aria-label={`Edit ${task.title}`}
+          title="Edit card"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </button>
       </div>
 
       {task.notionConflictAt ? (
@@ -445,17 +599,15 @@ function TaskCardContent({
         </div>
       ) : null}
 
-      {operatorAgentName ? (
-        <div className="mt-3 inline-flex max-w-full items-center gap-1.5 rounded-full border border-cyan-300/15 bg-cyan-300/[0.07] px-2.5 py-1 text-[11px] font-medium text-cyan-100">
-          <Bot className="h-3 w-3 flex-none" />
-          <span className="truncate">
-            {operatorAgentName}
-            {operatorAgentRoleTitle ? ` · ${operatorAgentRoleTitle}` : ""}
+      {project ? (
+        <div className="mt-3 flex flex-wrap gap-2">
+          <span className="inline-flex max-w-full items-center rounded-full border border-white/8 bg-white/[0.03] px-2.5 py-1 text-[11px] font-medium text-zinc-300">
+            <span className="truncate">{project}</span>
           </span>
         </div>
       ) : null}
 
-      {isInProgress ? (
+      {isInProgress || task.hermesThreadId ? (
         <div className="mt-4">
           {task.hermesThreadId ? (
             <a
@@ -464,7 +616,7 @@ function TaskCardContent({
             >
               <span className="inline-flex min-w-0 items-center gap-2">
                 <Bot className="h-4 w-4 flex-none" />
-                <span className="truncate">Hermes thread started</span>
+                <span className="truncate">Open Hermes thread</span>
               </span>
               <ExternalLink className="h-3.5 w-3.5 flex-none" />
             </a>
@@ -487,12 +639,12 @@ function TaskCardContent({
               <div className="flex items-center gap-2">
                 <button
                   type="button"
-                  onClick={onRunHermes}
+                  onClick={onCreateHermesThread}
                   disabled={isLaunching}
                   className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-[10px] border border-white/80 bg-white px-3 text-sm font-semibold text-[#09090b] shadow-[0_12px_28px_rgba(0,0,0,0.24)] transition hover:bg-zinc-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {isLaunching ? <Loader className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
-                  Run with Hermes
+                  {isLaunching ? <Loader className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />}
+                  Create thread
                 </button>
                 <button
                   type="button"
@@ -530,8 +682,150 @@ function TaskCardContent({
   );
 }
 
+function TaskEditorDialog({ draft, isSaving, onChange, onClose, onSave }: TaskEditorDialogProps) {
+  if (!draft) {
+    return null;
+  }
+
+  const canSave = draft.title.trim().length > 0 && !isSaving;
+  const dialogTitle = draft.mode === "create" ? "New card" : "Edit card";
+  const inputClassName =
+    "h-11 w-full rounded-[10px] border border-white/8 bg-white/[0.04] px-3 text-sm text-white outline-none transition placeholder:text-zinc-600 focus:border-indigo-300/40 focus:bg-white/[0.06]";
+  const selectClassName = `${inputClassName} [color-scheme:dark]`;
+  const optionClassName = "bg-[#15151a] text-zinc-100";
+  const labelClassName = "space-y-2 text-sm font-medium text-zinc-300";
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[90] flex items-center justify-center bg-black/65 px-4 py-8 backdrop-blur-sm"
+      onPointerDown={(event) => {
+        if (event.target === event.currentTarget && !isSaving) {
+          onClose();
+        }
+      }}
+    >
+      <form
+        className="w-full max-w-[560px] rounded-2xl border border-white/10 bg-[#15151a] p-5 shadow-[0_28px_80px_rgba(0,0,0,0.5)]"
+        onSubmit={(event) => {
+          event.preventDefault();
+          if (canSave) {
+            onSave();
+          }
+        }}
+      >
+        <div className="mb-5 flex items-center justify-between gap-4">
+          <h2 className="text-lg font-semibold text-zinc-50">{dialogTitle}</h2>
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSaving}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-[10px] text-zinc-500 transition hover:bg-white/[0.06] hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-60"
+            aria-label="Close card editor"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-4">
+          <label className={labelClassName}>
+            <span>Title</span>
+            <input
+              value={draft.title}
+              onChange={(event) => onChange({ ...draft, title: event.target.value })}
+              className={inputClassName}
+              autoFocus
+            />
+          </label>
+
+          <label className={labelClassName}>
+            <span>Description</span>
+            <textarea
+              value={draft.description}
+              onChange={(event) => onChange({ ...draft, description: event.target.value })}
+              rows={6}
+              className="w-full resize-none rounded-[10px] border border-white/8 bg-white/[0.04] px-3 py-3 text-sm leading-5 text-white outline-none transition placeholder:text-zinc-600 focus:border-indigo-300/40 focus:bg-white/[0.06]"
+            />
+          </label>
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className={labelClassName}>
+              <span>Status</span>
+              <select
+                value={draft.status}
+                onChange={(event) =>
+                  onChange({
+                    ...draft,
+                    status: event.target.value as TaskStatus,
+                  })
+                }
+                className={selectClassName}
+              >
+                {STATUS_ORDER.map((status) => (
+                  <option key={status} value={status} className={optionClassName}>
+                    {STATUS_META[status].label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className={labelClassName}>
+              <span>Priority</span>
+              <select
+                value={draft.priority}
+                onChange={(event) =>
+                  onChange({
+                    ...draft,
+                    priority: event.target.value as TaskPriority,
+                  })
+                }
+                className={selectClassName}
+              >
+                {Object.entries(PRIORITY_META).map(([priority, meta]) => (
+                  <option key={priority} value={priority} className={optionClassName}>
+                    {meta.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <div className="hidden sm:block" aria-hidden="true" />
+          </div>
+
+          <label className={labelClassName}>
+            <span>Project</span>
+            <input
+              value={draft.project}
+              onChange={(event) => onChange({ ...draft, project: event.target.value })}
+              className={inputClassName}
+            />
+          </label>
+        </div>
+
+        <div className="mt-6 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={isSaving}
+            className="h-10 rounded-[10px] border border-white/8 px-4 text-sm font-medium text-zinc-400 transition hover:border-white/12 hover:text-zinc-200 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="submit"
+            disabled={!canSave}
+            className="inline-flex h-10 items-center justify-center gap-2 rounded-[10px] border border-white/80 bg-white px-4 text-sm font-semibold text-[#09090b] transition hover:bg-zinc-100 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {isSaving ? <Loader className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+            Save
+          </button>
+        </div>
+      </form>
+    </div>,
+    document.body,
+  );
+}
+
 export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDoc[] }) {
-  const router = useRouter();
   const tasksQuery = useQuery(api.tasks.list);
   const teamMembersQuery = useQuery(api.teamMembers.list);
   const linkHermesThread = useMutation(api.tasks.linkHermesThread);
@@ -546,7 +840,12 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
   const [launchPromptTaskId, setLaunchPromptTaskId] = useState<Id<"tasks"> | null>(null);
   const [launchingTaskId, setLaunchingTaskId] = useState<Id<"tasks"> | null>(null);
   const [launchError, setLaunchError] = useState<string | null>(null);
-  const [autoStartHermes, setAutoStartHermes] = useState(false);
+  const [notionSyncError, setNotionSyncError] = useState<string | null>(null);
+  const [notionSyncMessage, setNotionSyncMessage] = useState<string | null>(null);
+  const [isSyncingNotion, setIsSyncingNotion] = useState(false);
+  const [taskEditorDraft, setTaskEditorDraft] = useState<TaskEditorDraft | null>(null);
+  const [isSavingTaskEditor, setIsSavingTaskEditor] = useState(false);
+  const [autoLinkHermes, setAutoLinkHermes] = useState(false);
   const [removedTaskIds, setRemovedTaskIds] = useState<Id<"tasks">[]>([]);
   const dragStateRef = useRef<KanbanDragState | null>(null);
   const dragTargetRef = useRef<DragTarget | null>(null);
@@ -564,58 +863,23 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
   }, [optimisticTasks, removedTaskIds, serverTasks]);
 
   useEffect(() => {
-    setAutoStartHermes(window.localStorage.getItem(AUTO_START_STORAGE_KEY) === "true");
+    const serverTasksById = new Map(serverTasks.map((task) => [task._id, task]));
+    setOptimisticTasks((current) => {
+      const next = current.filter((task) => {
+        const serverTask = serverTasksById.get(task._id);
+        return Boolean(serverTask && task.updatedAt > serverTask.updatedAt);
+      });
+      return next.length === current.length ? current : next;
+    });
+  }, [serverTasks]);
+
+  useEffect(() => {
+    setAutoLinkHermes(window.localStorage.getItem(AUTO_LINK_STORAGE_KEY) === "true");
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(AUTO_START_STORAGE_KEY, String(autoStartHermes));
-  }, [autoStartHermes]);
-
-  useEffect(() => {
-    let disposed = false;
-    let syncInFlight = false;
-
-    async function runAutoSync() {
-      if (disposed || syncInFlight || document.visibilityState === "hidden") {
-        return;
-      }
-
-      syncInFlight = true;
-      try {
-        await syncNotionTasksViaServer();
-      } catch (error) {
-        if (!disposed) {
-          console.warn(
-            `[mission-control] Notion auto-sync failed: ${
-              error instanceof Error ? error.message : "Unknown error"
-            }`,
-          );
-        }
-      } finally {
-        syncInFlight = false;
-      }
-    }
-
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        void runAutoSync();
-      }
-    };
-    const interval = window.setInterval(() => {
-      void runAutoSync();
-    }, NOTION_AUTO_SYNC_INTERVAL_MS);
-
-    void runAutoSync();
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("focus", handleVisibilityChange);
-
-    return () => {
-      disposed = true;
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("focus", handleVisibilityChange);
-    };
-  }, []);
+    window.localStorage.setItem(AUTO_LINK_STORAGE_KEY, String(autoLinkHermes));
+  }, [autoLinkHermes]);
 
   const visibleTasks = useMemo(
     () => tasks.filter((task) => matchesSearch(task, deferredSearch)),
@@ -639,6 +903,7 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
   const inProgressCount = tasks.filter((task) => toMissionControlTaskStatus(task.status) === "In progress").length;
   const completedCount = tasks.filter((task) => toMissionControlTaskStatus(task.status) === "Done").length;
   const completionRate = tasks.length === 0 ? 0 : Math.round((completedCount / tasks.length) * 100);
+  const visibleError = taskMutationError ?? launchError ?? notionSyncError;
 
   useEffect(() => {
     return () => {
@@ -646,13 +911,160 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
     };
   }, []);
 
-  async function runHermesForTask(task: TaskDoc) {
-    if (launchingTaskId === task._id) {
+  function upsertOptimisticTask(task: TaskDoc) {
+    setRemovedTaskIds((current) => current.filter((taskId) => taskId !== task._id));
+    setOptimisticTasks((current) => [task, ...current.filter((currentTask) => currentTask._id !== task._id)]);
+  }
+
+  function applyNotionSyncResult(syncResult: Awaited<ReturnType<typeof syncNotionTasksViaServer>>) {
+    if (syncResult.removedTaskIds.length === 0) {
       return;
     }
 
-    if (task.hermesThreadId) {
-      router.push(`/mission-control/hermes?thread=${task.hermesThreadId}`);
+    const removedTaskIdSet = new Set(syncResult.removedTaskIds);
+    setRemovedTaskIds((current) => {
+      const next = new Set(current);
+      for (const taskId of syncResult.removedTaskIds) {
+        next.add(taskId);
+      }
+      return [...next];
+    });
+    setOptimisticTasks((current) => current.filter((task) => !removedTaskIdSet.has(task._id)));
+  }
+
+  function openCreateTaskEditor(status: TaskStatus = "Not started") {
+    setTaskMutationError(null);
+    setTaskEditorDraft(createTaskEditorDraft(status));
+  }
+
+  function openEditTaskEditor(task: TaskDoc) {
+    setTaskMutationError(null);
+    setTaskEditorDraft(editTaskEditorDraft(task));
+  }
+
+  function closeTaskEditor() {
+    if (!isSavingTaskEditor) {
+      setTaskEditorDraft(null);
+    }
+  }
+
+  async function saveTaskEditorDraft() {
+    if (!taskEditorDraft || isSavingTaskEditor) {
+      return;
+    }
+
+    const payload = taskEditorPayload(taskEditorDraft);
+    if (!payload.title) {
+      setTaskMutationError("Task title is required.");
+      return;
+    }
+
+    const existingTask =
+      taskEditorDraft.mode === "edit" && taskEditorDraft.taskId
+        ? tasks.find((task) => task._id === taskEditorDraft.taskId)
+        : undefined;
+    setIsSavingTaskEditor(true);
+    setTaskMutationError(null);
+
+    try {
+      if (taskEditorDraft.mode === "create") {
+        const operatorAgent = resolveHermesTaskOperatorAgent(
+          { _id: "new-task", operatorAgentId: undefined },
+          tasks,
+          teamMembers,
+        );
+        const firstTaskInStatus =
+          tasks
+            .filter((task) => toMissionControlTaskStatus(task.status) === payload.status)
+            .sort(compareMissionControlKanbanTasks)[0]?._id ?? null;
+        const mutationResult = await mutateTaskViaServer("POST", {
+          ...payload,
+          ...(operatorAgent ? { operatorAgentId: operatorAgent._id } : {}),
+          kanbanOrder: resolveMissionControlKanbanOrder<string>(tasks, {
+            taskId: "new-task",
+            status: payload.status,
+            beforeTaskId: firstTaskInStatus,
+          }),
+        });
+
+        if (mutationResult.kind === "saved") {
+          upsertOptimisticTask(mutationResult.task);
+        }
+        setTaskEditorDraft(null);
+        return;
+      }
+
+      if (!existingTask) {
+        throw new Error("Task not found.");
+      }
+
+      const statusChanged = toMissionControlTaskStatus(existingTask.status) !== payload.status;
+      const kanbanOrder = statusChanged
+        ? resolveMissionControlKanbanOrder(tasks, {
+            taskId: existingTask._id,
+            status: payload.status,
+            beforeTaskId: null,
+          })
+        : existingTask.kanbanOrder;
+      const optimisticTask: TaskDoc = {
+        ...existingTask,
+        title: payload.title,
+        description: trimOptionalText(payload.description),
+        status: payload.status,
+        priority: payload.priority,
+        project: trimOptionalText(payload.project),
+        kanbanOrder,
+        updatedAt: Date.now(),
+      };
+      upsertOptimisticTask(optimisticTask);
+
+      const mutationResult = await mutateTaskViaServer("PATCH", {
+        id: existingTask._id,
+        ...payload,
+        ...(statusChanged && kanbanOrder !== undefined ? { kanbanOrder } : {}),
+      });
+
+      if (mutationResult.kind === "saved") {
+        upsertOptimisticTask(mutationResult.task);
+      } else {
+        setRemovedTaskIds((current) =>
+          current.includes(mutationResult.taskId) ? current : [...current, mutationResult.taskId],
+        );
+        setOptimisticTasks((current) => current.filter((task) => task._id !== mutationResult.taskId));
+      }
+      setTaskEditorDraft(null);
+    } catch (error) {
+      if (existingTask) {
+        upsertOptimisticTask(existingTask);
+      }
+      setTaskMutationError(error instanceof Error ? error.message : "Unable to save card.");
+    } finally {
+      setIsSavingTaskEditor(false);
+    }
+  }
+
+  async function handleManualNotionSync() {
+    if (isSyncingNotion) {
+      return;
+    }
+
+    setIsSyncingNotion(true);
+    setNotionSyncError(null);
+    setNotionSyncMessage(null);
+
+    try {
+      const syncResult = await syncNotionTasksViaServer();
+      applyNotionSyncResult(syncResult);
+      setNotionSyncMessage(formatNotionSyncSummary(syncResult.summary));
+    } catch (error) {
+      setNotionSyncError(formatNotionSyncError(error));
+    } finally {
+      setIsSyncingNotion(false);
+    }
+  }
+
+  async function runHermesForTask(task: TaskDoc) {
+    if (launchingTaskId === task._id) {
       return;
     }
 
@@ -660,36 +1072,92 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
     setLaunchError(null);
 
     try {
-      const operatorAgent = resolveHermesTaskOperatorAgent(task, tasks, teamMembers);
-      const payload = await createHermesThreadForTask(operatorAgent?._id);
-      const operatorAgentId = operatorAgent?._id;
-      await linkHermesThread({
-        id: task._id,
-        hermesThreadId: payload.threadId,
-        ...(operatorAgentId ? { operatorAgentId } : {}),
-      });
+      const { threadId, officeAgentId } = await createHermesThreadHandoffForTask(task);
       setLaunchPromptTaskId(null);
-      await recordHermesTaskHandoff({
-        threadId: payload.threadId,
-        content: buildHermesTaskPrompt(task),
-        ...(operatorAgentId ? { officeAgentId: operatorAgentId } : {}),
-      });
-
-      void sendHermesTaskPromptInThread({
-        threadId: payload.threadId,
+      await sendHermesTaskPromptInThread({
+        threadId,
         taskId: task._id,
         content: buildHermesTaskRunPrompt(task),
-        ...(operatorAgentId ? { officeAgentId: operatorAgentId } : {}),
-      }).catch((error) => {
-        console.warn("Unable to run Hermes task.", error);
+        officeActivity: buildHermesTaskOfficeActivity(task),
+        ...(officeAgentId ? { officeAgentId } : {}),
       });
+    } catch (error) {
+      setLaunchError(error instanceof Error ? error.message : "Unable to run Hermes task.");
+    } finally {
+      setLaunchingTaskId(null);
+    }
+  }
 
-      router.push(`/mission-control/hermes?thread=${payload.threadId}`);
+  async function createHermesThreadForTaskHandoff(task: TaskDoc) {
+    if (launchingTaskId === task._id) {
+      return;
+    }
+
+    setLaunchingTaskId(task._id);
+    setLaunchError(null);
+
+    try {
+      await createHermesThreadHandoffForTask(task);
+      setLaunchPromptTaskId(null);
     } catch (error) {
       setLaunchError(error instanceof Error ? error.message : "Unable to start Hermes.");
     } finally {
       setLaunchingTaskId(null);
     }
+  }
+
+  async function createHermesThreadHandoffForTask(task: TaskDoc) {
+    if (task.hermesThreadId) {
+      return {
+        threadId: task.hermesThreadId,
+        officeAgentId: task.operatorAgentId,
+      };
+    }
+
+    const operatorAgent = resolveHermesTaskOperatorAgent(task, tasks, teamMembers);
+    const payload = await createHermesThreadForTask(operatorAgent?._id);
+    const operatorAgentId = operatorAgent?._id;
+    const now = Date.now();
+    const optimisticLinkedTask = {
+      ...task,
+      hermesThreadId: payload.threadId,
+      hermesStartedAt: now,
+      ...(operatorAgent
+        ? {
+            operatorAgentId: operatorAgent._id,
+            operatorAgentName: operatorAgent.name,
+            operatorAgentRoleTitle: operatorAgent.roleTitle,
+          }
+        : {}),
+      updatedAt: now,
+    } as TaskDoc;
+    setOptimisticTasks((current) => [
+      optimisticLinkedTask,
+      ...current.filter((currentTask) => currentTask._id !== task._id),
+    ]);
+
+    const linkedTask = await linkHermesThread({
+      id: task._id,
+      hermesThreadId: payload.threadId,
+      ...(operatorAgentId ? { operatorAgentId } : {}),
+    });
+    if (linkedTask) {
+      setOptimisticTasks((current) => [
+        linkedTask,
+        ...current.filter((currentTask) => currentTask._id !== linkedTask._id),
+      ]);
+    }
+    await recordHermesTaskHandoff({
+      threadId: payload.threadId,
+      content: buildHermesTaskPrompt(task),
+      officeActivity: buildHermesTaskOfficeActivity(task),
+      ...(operatorAgentId ? { officeAgentId: operatorAgentId } : {}),
+    });
+
+    return {
+      threadId: payload.threadId,
+      officeAgentId: operatorAgentId,
+    };
   }
 
   function clearDragState() {
@@ -807,8 +1275,8 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
           return;
         }
 
-        if (autoStartHermes || draggedTask.hermesLaunchMode === "auto") {
-          await runHermesForTask(draggedTask);
+        if (autoLinkHermes || draggedTask.hermesLaunchMode === "auto") {
+          await createHermesThreadForTaskHandoff(savedTask);
           return;
         }
 
@@ -882,6 +1350,12 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
         return;
       }
 
+      if (shouldDrop && !didMove) {
+        clearDragState();
+        openEditTaskEditor(task);
+        return;
+      }
+
       clearDragState();
     };
 
@@ -931,72 +1405,91 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
   }
 
   return (
-    <div className="flex flex-col gap-8">
-      <header className="space-y-6">
-        <div className="flex flex-wrap items-baseline gap-x-8 gap-y-3">
+    <div className="flex min-h-[calc(100dvh-12rem)] flex-col gap-4 lg:h-[calc(100dvh-3.25rem)] lg:min-h-0">
+      <header className="shrink-0 space-y-4">
+        <div className="grid grid-cols-2 gap-3 sm:flex sm:flex-wrap sm:items-baseline sm:gap-x-8 sm:gap-y-3">
           {[
             { label: "This week", value: tasksThisWeek, tone: "text-emerald-300" },
             { label: "In progress", value: inProgressCount, tone: "text-indigo-300" },
             { label: "Total", value: tasks.length, tone: "text-white" },
             { label: "Completion", value: `${completionRate}%`, tone: "text-violet-300" },
           ].map((stat) => (
-            <div key={stat.label} className="flex items-baseline gap-3">
-              <span className={`text-4xl font-semibold tracking-[-0.08em] ${stat.tone}`}>
-                {stat.value}
-              </span>
-              <span className="text-sm text-zinc-500">{stat.label}</span>
+            <div key={stat.label} className="flex min-w-0 items-baseline gap-3">
+              <span className={`text-3xl font-semibold sm:text-4xl ${stat.tone}`}>{stat.value}</span>
+              <span className="min-w-0 text-sm text-zinc-500">{stat.label}</span>
             </div>
           ))}
         </div>
 
-        <div className="flex flex-col items-start gap-2 xl:items-end">
-          <label className="relative flex h-12 w-full items-center gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-4 text-sm text-zinc-400 xl:ml-auto xl:max-w-[360px]">
+        <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-center">
+          <label className="relative flex h-12 w-full min-w-0 items-center gap-3 rounded-xl border border-white/8 bg-white/[0.02] px-4 text-sm text-zinc-400 lg:max-w-[560px] lg:flex-1">
             <Search className="h-4 w-4 flex-none text-zinc-500" />
             <input
               type="search"
               value={searchText}
               onChange={(event) => setSearchText(event.target.value)}
               placeholder="Search tasks"
-              className="w-full bg-transparent text-white outline-none placeholder:text-zinc-500"
+              className="min-w-0 flex-1 bg-transparent text-white outline-none placeholder:text-zinc-500"
             />
           </label>
-          <label className="inline-flex h-10 w-fit cursor-pointer items-center gap-2.5 rounded-full border border-white/8 bg-white/[0.025] px-2.5 pr-3 text-sm font-medium text-zinc-400 transition hover:border-white/12 hover:bg-white/[0.04] hover:text-zinc-200">
-            <input
-              type="checkbox"
-              checked={autoStartHermes}
-              onChange={(event) => setAutoStartHermes(event.target.checked)}
-              className="sr-only"
-            />
-            <span
-              className={`relative h-5 w-9 flex-none rounded-full border transition ${
-                autoStartHermes
-                  ? "border-emerald-300/40 bg-emerald-400/70"
-                  : "border-white/8 bg-white/10"
-              }`}
+          <div className="flex min-w-0 flex-wrap items-center gap-2 lg:ml-auto lg:justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                void handleManualNotionSync();
+              }}
+              disabled={isSyncingNotion}
+              className="inline-flex h-12 flex-1 items-center justify-center gap-2 rounded-xl border border-indigo-300/20 bg-indigo-300/[0.08] px-3 text-sm font-semibold text-indigo-100 transition hover:border-indigo-300/30 hover:bg-indigo-300/[0.12] active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60 sm:flex-none sm:px-4"
             >
-              <span
-                className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.28)] transition ${
-                  autoStartHermes ? "left-4" : "left-0.5"
-                }`}
+              <RefreshCw className={`h-4 w-4 ${isSyncingNotion ? "animate-spin" : ""}`} />
+              Sync Notion
+            </button>
+            <label className="inline-flex h-10 w-full cursor-pointer items-center justify-center gap-2.5 rounded-full border border-white/8 bg-white/[0.025] px-2.5 pr-3 text-sm font-medium text-zinc-400 transition hover:border-white/12 hover:bg-white/[0.04] hover:text-zinc-200 sm:w-fit">
+              <input
+                type="checkbox"
+                checked={autoLinkHermes}
+                onChange={(event) => setAutoLinkHermes(event.target.checked)}
+                className="sr-only"
               />
-            </span>
-            <span className="whitespace-nowrap">Auto-start Hermes</span>
-          </label>
+              <span
+                className={`relative h-5 w-9 flex-none rounded-full border transition ${
+                  autoLinkHermes
+                    ? "border-emerald-300/40 bg-emerald-400/70"
+                    : "border-white/8 bg-white/10"
+                }`}
+              >
+                <span
+                  className={`absolute top-1/2 h-4 w-4 -translate-y-1/2 rounded-full bg-white shadow-[0_2px_8px_rgba(0,0,0,0.28)] transition ${
+                    autoLinkHermes ? "left-4" : "left-0.5"
+                  }`}
+                />
+              </span>
+              <span className="whitespace-nowrap">Auto-link Hermes</span>
+            </label>
+          </div>
         </div>
 
-        {launchError || taskMutationError ? (
+        {visibleError ? (
           <div
             className={`rounded-xl border px-4 py-3 text-sm ${
               "border-rose-400/20 bg-rose-400/[0.07] text-rose-100"
             }`}
           >
-            {taskMutationError ?? launchError}
+            {visibleError}
+          </div>
+        ) : null}
+        {notionSyncMessage && !visibleError ? (
+          <div className="rounded-xl border border-emerald-300/15 bg-emerald-300/[0.07] px-4 py-3 text-sm text-emerald-100">
+            {notionSyncMessage}
           </div>
         ) : null}
       </header>
 
-      <section className="overflow-x-auto pb-2">
-        <div className="grid w-max grid-cols-[repeat(3,minmax(220px,280px))] gap-4">
+      <section
+        data-slot="mission-control-task-board"
+        className="flex min-h-[540px] flex-1 flex-col overflow-hidden lg:min-h-0"
+      >
+        <div className="grid min-h-0 flex-1 grid-flow-col auto-cols-[minmax(260px,78vw)] gap-4 overflow-x-auto pb-2 sm:auto-cols-[minmax(300px,360px)] lg:grid-flow-row lg:grid-cols-4 lg:auto-cols-fr">
           {columnTasks.map(({ status, tasks: tasksForStatus }, index) => {
             const showEndDropLine = dragTarget?.status === status && dragTarget.beforeTaskId === null;
 
@@ -1004,7 +1497,7 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
               <section
                 key={status}
                 data-task-column={status}
-                className="flex min-h-[560px] flex-col"
+                className="mission-control-column flex min-h-0 min-w-0 flex-col rounded-[18px] border border-white/[0.07] bg-[#101117] p-3 shadow-[inset_0_1px_0_rgba(255,255,255,0.025)] sm:p-4"
                 style={{ animationDelay: `${index * 60}ms` }}
               >
                 <header className="flex items-center justify-between gap-3">
@@ -1013,44 +1506,57 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
                     <h3 className="text-[0.98rem] font-medium text-zinc-100">{STATUS_META[status].label}</h3>
                     <span className="text-sm text-zinc-500">{tasksForStatus.length}</span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => openCreateTaskEditor(status)}
+                    className="inline-flex h-8 w-8 items-center justify-center rounded-[10px] border border-white/8 bg-white/[0.03] text-zinc-500 transition hover:border-white/14 hover:bg-white/[0.06] hover:text-zinc-100 active:scale-95"
+                    aria-label={`Add ${STATUS_META[status].label} card`}
+                    title="Add card"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                  </button>
                 </header>
 
                 <TaskColumnDropZone status={status} isActive={dragOverStatus === status}>
-                {tasksForStatus.length === 0 ? (
-                  <>
-                    {showEndDropLine ? <DropIndicator /> : null}
-                    <TaskColumnEmptyState label={STATUS_META[status].emptyLabel} />
-                  </>
-                ) : null}
+                  {tasksForStatus.length === 0 ? (
+                    <>
+                      {showEndDropLine ? <DropIndicator /> : null}
+                      <TaskColumnEmptyState label={STATUS_META[status].emptyLabel} />
+                    </>
+                  ) : null}
 
-                {tasksForStatus.map((task) => {
-                  const isLaunchPromptOpen = launchPromptTaskId === task._id;
-                  const isLaunching = launchingTaskId === task._id;
+                  {tasksForStatus.map((task) => {
+                    const isLaunchPromptOpen = launchPromptTaskId === task._id;
+                    const isLaunching = launchingTaskId === task._id;
 
-                  return (
-                    <div key={task._id} className="contents">
-                      {dragTarget?.status === status && dragTarget.beforeTaskId === task._id ? <DropIndicator /> : null}
-                      <DraggableTaskCard
-                        taskId={task._id}
-                        isDragging={draggedTaskId === task._id}
-                        onPointerDown={(pointerEvent) => handleCardPointerDown(pointerEvent, task)}
-                      >
-                        <TaskCardContent
-                          task={task}
-                          isLaunchPromptOpen={isLaunchPromptOpen}
-                          isLaunching={isLaunching}
-                          onRunHermes={() => {
-                            void runHermesForTask(task);
-                          }}
-                          onDismissLaunchPrompt={() => setLaunchPromptTaskId(null)}
-                        />
-                      </DraggableTaskCard>
-                    </div>
-                  );
-                })}
+                    return (
+                      <div key={task._id} className="contents">
+                        {dragTarget?.status === status && dragTarget.beforeTaskId === task._id ? <DropIndicator /> : null}
+                        <DraggableTaskCard
+                          taskId={task._id}
+                          isDragging={draggedTaskId === task._id}
+                          onPointerDown={(pointerEvent) => handleCardPointerDown(pointerEvent, task)}
+                        >
+                          <TaskCardContent
+                            task={task}
+                            isLaunchPromptOpen={isLaunchPromptOpen}
+                            isLaunching={isLaunching}
+                            onEdit={() => openEditTaskEditor(task)}
+                            onCreateHermesThread={() => {
+                              void createHermesThreadForTaskHandoff(task);
+                            }}
+                            onRunHermes={() => {
+                              void runHermesForTask(task);
+                            }}
+                            onDismissLaunchPrompt={() => setLaunchPromptTaskId(null)}
+                          />
+                        </DraggableTaskCard>
+                      </div>
+                    );
+                  })}
 
-                {tasksForStatus.length > 0 && showEndDropLine ? <DropIndicator /> : null}
-              </TaskColumnDropZone>
+                  {tasksForStatus.length > 0 && showEndDropLine ? <DropIndicator /> : null}
+                </TaskColumnDropZone>
               </section>
             );
           })}
@@ -1072,6 +1578,8 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
                     task={activeTask}
                     isLaunchPromptOpen={false}
                     isLaunching={launchingTaskId === activeTask._id}
+                    onEdit={() => undefined}
+                    onCreateHermesThread={() => undefined}
                     onRunHermes={() => undefined}
                     onDismissLaunchPrompt={() => undefined}
                   />
@@ -1088,8 +1596,18 @@ export function MissionControlTasksView({ initialTasks }: { initialTasks: TaskDo
             ? `${tasks.length} tasks in view`
             : `Showing ${visibleTasks.length} of ${tasks.length} tasks`}
         </p>
-        <p>Drag cards into In progress to prepare a Hermes handoff.</p>
+        <p>Drag cards into In progress to prepare a Hermes handoff. Sync Notion when changes are ready.</p>
       </footer>
+
+      <TaskEditorDialog
+        draft={taskEditorDraft}
+        isSaving={isSavingTaskEditor}
+        onChange={setTaskEditorDraft}
+        onClose={closeTaskEditor}
+        onSave={() => {
+          void saveTaskEditorDraft();
+        }}
+      />
     </div>
   );
 }

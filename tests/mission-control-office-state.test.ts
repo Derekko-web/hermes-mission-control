@@ -144,3 +144,34 @@ test("returns only fresh non-idle presence entries for live activity", () => {
     [lead.label],
   );
 });
+
+test("suppresses internal Hermes task instructions from Pixel Agents live activity", () => {
+  const officeRoster = [
+    {
+      member: {
+        _id: "team-lead",
+        name: lead.label,
+        roleTitle: lead.roleTitle,
+        color: lead.color,
+        avatarLabel: lead.avatarLabel,
+      },
+      presence: {
+        _id: "presence-lead",
+        memberName: lead.label,
+        status: "working",
+        area: "south_station",
+        currentTask: "Hermes: Run the task, but leave the card status",
+        activeTool: "Hermes",
+        isAtDesk: true,
+        lastUpdatedAt: now - 5 * 60_000,
+      },
+    },
+  ] as unknown as readonly OfficeRosterEntry[];
+
+  const agents = buildPixelOfficeAgents(officeRoster, now);
+  const liveEntries = buildLiveActivityEntries(officeRoster, now);
+
+  assert.equal(agents[0]?.isActive, false);
+  assert.equal(agents[0]?.statusLabel, "Idle");
+  assert.deepEqual(liveEntries, []);
+});

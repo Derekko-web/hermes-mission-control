@@ -2,7 +2,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import { MissionControlShell } from "../src/components/mission-control/MissionControlShell";
+import {
+  MissionControlShell,
+  formatMissionControlThemeAriaLabel,
+  formatMissionControlThemeButtonLabel,
+  getNextMissionControlTheme,
+  resolveStoredMissionControlTheme,
+} from "../src/components/mission-control/MissionControlShell";
 
 test("renders only the requested live Mission Control tools in the sidebar", () => {
   const markup = renderToStaticMarkup(
@@ -64,15 +70,34 @@ test("renders the Hermes route inside the compact Mission Control shell with the
 });
 
 test("renders a light mode button fixed to the upper right of Mission Control", () => {
-  const markup = renderToStaticMarkup(
-    <MissionControlShell tool="tasks">
-      <div>Task board content</div>
-    </MissionControlShell>,
-  );
+  for (const tool of ["tasks", "memory", "office", "hermes"] as const) {
+    const markup = renderToStaticMarkup(
+      <MissionControlShell tool={tool}>
+        <div>{tool} content</div>
+      </MissionControlShell>,
+    );
 
-  assert.match(markup, /data-slot="mission-control-light-mode-button"/);
-  assert.match(markup, /aria-label="Switch to light mode"/);
-  assert.match(markup, /top-4/);
-  assert.match(markup, /right-4/);
-  assert.match(markup, />Light mode</);
+    assert.match(markup, /data-slot="mission-control-light-mode-button"/, `${tool} should render the theme button`);
+    assert.match(markup, /aria-label="Switch to light mode"/, `${tool} should default to the light-mode action`);
+    assert.match(markup, /aria-pressed="false"/, `${tool} should expose the dark-mode pressed state by default`);
+    assert.match(markup, /top-4/, `${tool} button should be anchored to the upper edge`);
+    assert.match(markup, /right-4/, `${tool} button should be anchored to the right edge`);
+    assert.match(markup, />Light mode</, `${tool} should show the light mode label before hydration`);
+  }
+});
+
+test("resolves Mission Control theme toggle state and accessible labels", () => {
+  assert.equal(resolveStoredMissionControlTheme(null), "dark");
+  assert.equal(resolveStoredMissionControlTheme(""), "dark");
+  assert.equal(resolveStoredMissionControlTheme("dark"), "dark");
+  assert.equal(resolveStoredMissionControlTheme("light"), "light");
+  assert.equal(resolveStoredMissionControlTheme("true"), "light");
+
+  assert.equal(getNextMissionControlTheme("dark"), "light");
+  assert.equal(getNextMissionControlTheme("light"), "dark");
+
+  assert.equal(formatMissionControlThemeButtonLabel("dark"), "Light mode");
+  assert.equal(formatMissionControlThemeButtonLabel("light"), "Dark mode");
+  assert.equal(formatMissionControlThemeAriaLabel("dark"), "Switch to light mode");
+  assert.equal(formatMissionControlThemeAriaLabel("light"), "Switch to dark mode");
 });

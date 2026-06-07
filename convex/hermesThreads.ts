@@ -3,6 +3,8 @@ import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { mutation, query } from "./_generated/server";
+import { resolveMissionControlKanbanOrder } from "../shared/missionControlKanban";
+import { toMissionControlTaskStatus } from "../shared/missionControlTasks";
 import { normalizeHermesThreadSettings } from "../src/components/mission-control/mission-control-hermes-shared";
 
 type HermesAttachment = {
@@ -69,7 +71,12 @@ function buildOfficeAgentThreadPatch(officeAgent: HermesOfficeAgent | null) {
   };
 }
 
-function buildHermesOfficeActivity(content: string, attachments: HermesAttachment[]) {
+function buildHermesOfficeActivity(content: string, attachments: HermesAttachment[], officeActivity?: string) {
+  const trimmedActivity = officeActivity?.trim();
+  if (trimmedActivity) {
+    return trimmedActivity;
+  }
+
   const normalized = content.replace(/^\/[a-z]+\s*/i, "").trim();
   if (normalized) {
     return `Hermes: ${normalized.split(/\s+/).slice(0, 8).join(" ")}`;
@@ -88,6 +95,7 @@ async function updateOfficePresenceForHermes(
   content: string,
   attachments: HermesAttachment[],
   now: number,
+  officeActivity?: string,
 ) {
   if (!officeAgent) {
     return;
@@ -99,7 +107,7 @@ async function updateOfficePresenceForHermes(
     .take(1);
   const presencePatch = {
     status: "working" as const,
-    currentTask: buildHermesOfficeActivity(content, attachments),
+    currentTask: buildHermesOfficeActivity(content, attachments, officeActivity),
     statusNote: `Bound to Hermes as ${officeAgent.roleTitle}.`,
     activeTool: "Hermes",
     isAtDesk: true,
@@ -118,6 +126,62 @@ async function updateOfficePresenceForHermes(
     createdAt: now,
     ...presencePatch,
   });
+}
+
+async function findHermesLinkedTask(
+  ctx: MutationCtx,
+  args: {
+    threadId: Id<"hermesThreads">;
+    taskId?: Id<"tasks">;
+  },
+) {
+  if (args.taskId) {
+    const task = await ctx.db.get(args.taskId);
+    if (!task) {
+      throw new Error("Task not found.");
+    }
+    if (task.hermesThreadId && task.hermesThreadId !== args.threadId) {
+      throw new Error("Task is linked to a different Hermes thread.");
+    }
+    return task;
+  }
+
+  const tasks = await ctx.db.query("tasks").collect();
+  return tasks.find((task) => task.hermesThreadId === args.threadId) ?? null;
+}
+
+async function moveHermesTaskToReview(
+  ctx: MutationCtx,
+  args: {
+    threadId: Id<"hermesThreads">;
+    taskId?: Id<"tasks">;
+    now: number;
+  },
+) {
+  const task = await findHermesLinkedTask(ctx, args);
+  if (!task || toMissionControlTaskStatus(task.status) !== "In progress") {
+    return null;
+  }
+
+  const tasks = await ctx.db.query("tasks").collect();
+  const kanbanOrder = resolveMissionControlKanbanOrder(tasks, {
+    taskId: task._id,
+    status: "In review",
+    beforeTaskId: null,
+    now: args.now,
+  });
+
+  await ctx.db.patch(task._id, {
+    status: "In review",
+    kanbanOrder,
+    updatedAt: args.now,
+  });
+
+  return {
+    taskId: task._id,
+    previousStatus: "In progress" as const,
+    nextStatus: "In review" as const,
+  };
 }
 
 const LEGACY_THREAD_TITLE = "Hermes launch thread";
@@ -264,16 +328,18 @@ export const getThread = query({
 
 export const createThread = mutation({
   args: {
+    title: v.optional(v.string()),
     officeAgentId: v.optional(v.id("teamMembers")),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
     const settings = normalizeHermesThreadSettings({});
+    const title = args.title?.trim() || "New chat";
     const officeAgent = args.officeAgentId
       ? await requireOfficeAgent(ctx, args.officeAgentId)
       : await getDefaultOfficeAgent(ctx);
     const threadId = await ctx.db.insert("hermesThreads", {
-      title: "New chat",
+      title,
       summary: "Ready for the next turn.",
       pinned: false,
       ...buildOfficeAgentThreadPatch(officeAgent),
@@ -287,7 +353,7 @@ export const createThread = mutation({
 
     return {
       threadId,
-      title: "New chat",
+      title,
       modelId: settings.modelId,
       reasoningEffort: settings.reasoningEffort,
       fastModeEnabled: settings.fastModeEnabled,
@@ -428,6 +494,7 @@ export const recordTaskHandoff = mutation({
     threadId: v.id("hermesThreads"),
     content: v.string(),
     officeAgentId: v.optional(v.id("teamMembers")),
+    officeActivity: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const content = args.content.trim();
@@ -461,6 +528,7 @@ export const recordTaskHandoff = mutation({
       updatedAt: now,
       lastMessageAt: now,
     });
+    await updateOfficePresenceForHermes(ctx, officeAgent, content, [], now, args.officeActivity);
 
     return {
       inserted: 1,
@@ -473,13 +541,14 @@ export const recordTaskHandoff = mutation({
 export const recordAssistantResponse = mutation({
   args: {
     threadId: v.id("hermesThreads"),
+    taskId: v.optional(v.id("tasks")),
     content: v.string(),
     assistantContent: v.string(),
     hermesSessionId: v.string(),
     officeAgentId: v.optional(v.id("teamMembers")),
+    officeActivity: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const content = args.content.trim();
     const assistantContent = args.assistantContent.trim();
     if (!assistantContent) {
       throw new Error("Assistant content is required.");
@@ -494,8 +563,9 @@ export const recordAssistantResponse = mutation({
       ? await requireOfficeAgent(ctx, args.officeAgentId)
       : await findOfficeAgent(ctx, thread.officeAgentId);
     const now = Date.now();
-    const nextTitle = content ? buildHermesThreadTitle(content, []) : thread.title;
-    const resolvedThreadTitle = thread.title && thread.title !== "New chat" ? thread.title : nextTitle;
+    const officeActivity =
+      args.officeActivity?.trim() ||
+      (thread.title && thread.title !== "New chat" ? `Working on ${thread.title}` : "Working in Hermes thread");
     const assistantMessageId = await ctx.db.insert("hermesMessages", {
       threadId: args.threadId,
       role: "assistant",
@@ -505,19 +575,23 @@ export const recordAssistantResponse = mutation({
     });
 
     await ctx.db.patch(args.threadId, {
-      title: resolvedThreadTitle,
-      summary: content ? buildHermesSummary(content, []) : thread.summary,
       hermesSessionId: args.hermesSessionId,
       ...buildOfficeAgentThreadPatch(officeAgent),
       updatedAt: now,
       lastMessageAt: now,
     });
-    await updateOfficePresenceForHermes(ctx, officeAgent, content, [], now);
+    await updateOfficePresenceForHermes(ctx, officeAgent, "", [], now, officeActivity);
+    const reviewTransition = await moveHermesTaskToReview(ctx, {
+      threadId: args.threadId,
+      taskId: args.taskId,
+      now,
+    });
 
     return {
       inserted: 1,
       threadId: args.threadId,
       assistantMessageId,
+      reviewTransition,
     };
   },
 });

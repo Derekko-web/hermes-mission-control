@@ -1,14 +1,20 @@
-export const MISSION_CONTROL_TASK_STATUSES = ["Not started", "In progress", "Done"] as const;
+export const MISSION_CONTROL_TASK_STATUSES = ["Not started", "In progress", "In review", "Done"] as const;
 
 export type MissionControlTaskStatus = (typeof MISSION_CONTROL_TASK_STATUSES)[number];
 
 export const DEFAULT_MISSION_CONTROL_TASK_STATUS: MissionControlTaskStatus = "Not started";
 
 const LEGACY_TASK_STATUS_TO_NOTION_DEFAULT = {
+  "To Do": "Not started",
+  "In Progress": "In progress",
+  "In Review": "In review",
+  Complete: "Done",
   recurring: "Not started",
   backlog: "Not started",
   in_progress: "In progress",
-  review: "In progress",
+  in_review: "In review",
+  "in-review": "In review",
+  review: "In review",
   done: "Done",
 } as const satisfies Record<string, MissionControlTaskStatus>;
 

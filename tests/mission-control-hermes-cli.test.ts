@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   buildHermesAgentPromptContent,
   buildHermesChatArgs,
+  buildHermesCliPromptContent,
   parseHermesChatOutput,
 } from "../src/components/mission-control/mission-control-hermes-cli";
 
@@ -52,6 +53,15 @@ test("wraps Hermes prompts with the selected Office agent identity", () => {
   assert.match(prompt, /User request:\nDraft the rollout note\./);
 });
 
+test("wraps Hermes CLI prompts with final-answer extraction markers", () => {
+  const prompt = buildHermesCliPromptContent("Draft the rollout note.");
+
+  assert.match(prompt, /Mission Control response protocol/);
+  assert.match(prompt, /<<<MISSION_CONTROL_FINAL_RESPONSE>>>/);
+  assert.match(prompt, /<<<END_MISSION_CONTROL_FINAL_RESPONSE>>>/);
+  assert.match(prompt, /Draft the rollout note\./);
+});
+
 test("parses quiet Hermes output for a brand new session", () => {
   const parsed = parseHermesChatOutput(`session_id: 20260420_210037_e575b8\npong\n`);
 
@@ -75,6 +85,26 @@ test("strips a resumed-session banner that appears after the session id", () => 
 
   assert.deepEqual(parsed, {
     response: "Reply with exactly: pong",
+    sessionId: "20260420_210037_e575b8",
+  });
+});
+
+test("extracts marked final answers from Hermes output with reasoning text", () => {
+  const parsed = parseHermesChatOutput(
+    [
+      "session_id: 20260420_210037_e575b8",
+      "┌─ Reasoning ──────────────────────────────────────────────────────────────────┐",
+      "**Finalizing response**",
+      "",
+      "I need to provide the exact answer.",
+      "<<<MISSION_CONTROL_FINAL_RESPONSE>>>",
+      "HERMES_API_OK",
+      "<<<END_MISSION_CONTROL_FINAL_RESPONSE>>>",
+    ].join("\n"),
+  );
+
+  assert.deepEqual(parsed, {
+    response: "HERMES_API_OK",
     sessionId: "20260420_210037_e575b8",
   });
 });

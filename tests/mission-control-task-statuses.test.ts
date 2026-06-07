@@ -8,14 +8,20 @@ import {
 } from "../shared/missionControlTasks";
 
 test("uses Notion default Kanban statuses as the native task statuses", () => {
-  assert.deepEqual(MISSION_CONTROL_TASK_STATUSES, ["Not started", "In progress", "Done"]);
+  assert.deepEqual(MISSION_CONTROL_TASK_STATUSES, ["Not started", "In progress", "In review", "Done"]);
 });
 
 test("normalizes legacy local statuses during the compatibility migration", () => {
+  assert.equal(toMissionControlTaskStatus("To Do"), "Not started");
+  assert.equal(toMissionControlTaskStatus("In Progress"), "In progress");
+  assert.equal(toMissionControlTaskStatus("In Review"), "In review");
+  assert.equal(toMissionControlTaskStatus("Complete"), "Done");
   assert.equal(toMissionControlTaskStatus("recurring"), "Not started");
   assert.equal(toMissionControlTaskStatus("backlog"), "Not started");
   assert.equal(toMissionControlTaskStatus("in_progress"), "In progress");
-  assert.equal(toMissionControlTaskStatus("review"), "In progress");
+  assert.equal(toMissionControlTaskStatus("in_review"), "In review");
+  assert.equal(toMissionControlTaskStatus("in-review"), "In review");
+  assert.equal(toMissionControlTaskStatus("review"), "In review");
   assert.equal(toMissionControlTaskStatus("done"), "Done");
 });
 

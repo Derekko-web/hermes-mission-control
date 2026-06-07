@@ -33,6 +33,7 @@ export function MissionControlApp({
       <MissionControlHermesView
         initialThreads={initialHermesThreads ?? []}
         initialTeamMembers={initialTeamMembers ?? []}
+        initialOfficePresence={initialOfficePresence ?? []}
       />
     ) : tool === "memory" ? (
       <MissionControlMemoryView initialMemories={initialMemories ?? []} />

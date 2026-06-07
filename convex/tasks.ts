@@ -10,6 +10,7 @@ import { buildStarterTasks, inferTemplateAssignee } from "../shared/missionContr
 const nativeTaskStatus = v.union(
   v.literal("Not started"),
   v.literal("In progress"),
+  v.literal("In review"),
   v.literal("Done"),
 );
 
@@ -64,18 +65,33 @@ export const create = mutation({
     project: v.optional(v.string()),
     createdBy: v.optional(v.string()),
     kanbanOrder: v.optional(v.number()),
+    operatorAgentId: v.optional(v.id("teamMembers")),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const operatorAgent = args.operatorAgentId ? await ctx.db.get(args.operatorAgentId) : null;
+    if (args.operatorAgentId && !operatorAgent) {
+      throw new Error("Pixel Agent not found.");
+    }
 
     return await ctx.db.insert("tasks", {
-      ...args,
       title: args.title.trim(),
       description: trimOptional(args.description),
+      status: args.status,
+      assignee: args.assignee,
+      priority: args.priority,
       project: trimOptional(args.project),
+      createdBy: args.createdBy,
       createdAt: now,
       updatedAt: now,
       kanbanOrder: args.kanbanOrder ?? -now,
+      ...(operatorAgent
+        ? {
+            operatorAgentId: operatorAgent._id,
+            operatorAgentName: operatorAgent.name,
+            operatorAgentRoleTitle: operatorAgent.roleTitle,
+          }
+        : {}),
     });
   },
 });
@@ -324,6 +340,7 @@ export const markNotionSynced = mutation({
     notionDataSourceId: v.optional(v.string()),
     notionPageId: v.string(),
     notionUrl: v.optional(v.string()),
+    notionBodyText: v.optional(v.string()),
     notionLastEditedAt: v.number(),
     notionLastSyncedHash: v.string(),
   },
@@ -333,7 +350,18 @@ export const markNotionSynced = mutation({
       throw new Error("Task not found.");
     }
 
-    await ctx.db.patch(args.id, {
+    const patch: {
+      notionDatabaseId?: string;
+      notionDataSourceId?: string;
+      notionPageId: string;
+      notionUrl?: string;
+      notionBodyText?: string;
+      notionLastEditedAt: number;
+      notionLastSyncedAt: number;
+      notionLastSyncedHash: string;
+      notionConflictAt: undefined;
+      notionConflictSummary: undefined;
+    } = {
       notionDatabaseId: trimOptional(args.notionDatabaseId),
       notionDataSourceId: trimOptional(args.notionDataSourceId),
       notionPageId: args.notionPageId,
@@ -343,7 +371,13 @@ export const markNotionSynced = mutation({
       notionLastSyncedHash: args.notionLastSyncedHash,
       notionConflictAt: undefined,
       notionConflictSummary: undefined,
-    });
+    };
+
+    if (args.notionBodyText !== undefined) {
+      patch.notionBodyText = trimOptional(args.notionBodyText);
+    }
+
+    await ctx.db.patch(args.id, patch);
 
     return await ctx.db.get(args.id);
   },
@@ -388,9 +422,11 @@ export const linkHermesThread = mutation({
       throw new Error("Pixel Agent not found.");
     }
 
+    const now = Date.now();
     await ctx.db.patch(args.id, {
       hermesThreadId: args.hermesThreadId,
-      hermesStartedAt: Date.now(),
+      hermesStartedAt: now,
+      updatedAt: now,
       ...(operatorAgent
         ? {
             operatorAgentId: operatorAgent._id,

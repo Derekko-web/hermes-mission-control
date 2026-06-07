@@ -8,6 +8,7 @@ import { NextResponse } from "next/server";
 import { api } from "../../../../../../convex/_generated/api";
 import type { Doc, Id } from "../../../../../../convex/_generated/dataModel";
 import {
+  buildNotionTaskChildren,
   buildNotionTaskProperties,
   buildTaskSyncHash,
   extractNotionTaskSnapshot,
@@ -19,7 +20,7 @@ import {
   isVisibleNotionPageRecord,
   isArchivedOrTrashedNotionMutationError,
   shouldDeleteMissionControlTaskMissingFromNotion,
-  shouldRemoveLocalOnlyMissionControlTask,
+  shouldCreateNotionTaskForLocalOnlyTask,
 } from "../../../../../../shared/missionControlNotionSyncPolicy";
 import { toMissionControlTaskStatus } from "../../../../../../shared/missionControlTasks";
 
@@ -55,7 +56,9 @@ type NotionClient = {
     retrieve: (args: { database_id: string }) => Promise<Record<string, unknown>>;
   };
   pages: {
+    create: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
     update: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
+    updateMarkdown: (args: Record<string, unknown>) => Promise<Record<string, unknown>>;
   };
   blocks: {
     children: {
@@ -300,12 +303,20 @@ function notionDescriptionForLocal(
   return existingTask?.description ?? notionTask.description;
 }
 
+function localNotionBodyText(task: TaskDoc, propertyNames: NotionTaskPropertyNames) {
+  if (propertyNames.description) {
+    return task.notionBodyText;
+  }
+
+  return task.description;
+}
+
 function localTaskPayload(task: TaskDoc, propertyNames: NotionTaskPropertyNames) {
   return {
     _id: task._id,
     title: task.title,
     description: propertyNames.description ? task.description : undefined,
-    notionBodyText: task.notionBodyText,
+    notionBodyText: localNotionBodyText(task, propertyNames),
     status: toMissionControlTaskStatus(task.status),
     assignee: propertyNames.assignee ? task.assignee : "unassigned",
     priority: propertyNames.priority ? task.priority : "medium",
@@ -388,6 +399,64 @@ async function queryAllNotionPages(notion: NotionClient, dataSourceId: string) {
   return pages;
 }
 
+function notionPageId(page: Record<string, unknown>) {
+  const id = page.id;
+  if (typeof id !== "string" || !id) {
+    throw new Error("Notion did not return a page id.");
+  }
+
+  return id;
+}
+
+function notionPageUrl(page: Record<string, unknown>, fallback?: string) {
+  return typeof page.url === "string" ? page.url : fallback;
+}
+
+function notionPageLastEditedAt(page: Record<string, unknown>) {
+  return msFromNotionTime(page.last_edited_time);
+}
+
+async function pushLocalBodyTextToNotion(
+  notion: NotionClient,
+  pageId: string,
+  task: TaskDoc,
+  propertyNames: NotionTaskPropertyNames,
+) {
+  if (propertyNames.description) {
+    return undefined;
+  }
+
+  const nextBodyText = task.description?.trim() ?? "";
+  await notion.pages.updateMarkdown({
+    page_id: pageId,
+    type: "replace_content",
+    replace_content: {
+      new_str: nextBodyText,
+      allow_deleting_content: true,
+    },
+  });
+
+  return nextBodyText;
+}
+
+async function createNotionPageForLocalTask(
+  notion: NotionClient,
+  dataSourceId: string,
+  task: TaskDoc,
+  propertyNames: NotionTaskPropertyNames,
+) {
+  const localBodyText = propertyNames.description ? undefined : task.description?.trim() || undefined;
+
+  return await notion.pages.create({
+    parent: {
+      type: "data_source_id",
+      data_source_id: dataSourceId,
+    },
+    properties: buildNotionTaskProperties(localTaskPayload(task, propertyNames), propertyNames),
+    ...(localBodyText ? { children: buildNotionTaskChildren(localBodyText) } : {}),
+  });
+}
+
 export async function POST() {
   try {
     const notion = new Client({
@@ -418,7 +487,7 @@ export async function POST() {
     const seenTaskIds = new Set<string>();
     const summary = {
       createdInMissionControl: 0,
-      removedLocalOnly: 0,
+      createdInNotion: 0,
       deletedFromMissionControl: 0,
       pulledFromNotion: 0,
       pushedToNotion: 0,
@@ -427,7 +496,17 @@ export async function POST() {
       skippedMissingRemote: 0,
       bodyReadFailures,
     };
+    const removedTaskIds: Id<"tasks">[] = [];
     const missionControlCreates = [];
+
+    async function removeTaskFromMissionControl(id: Id<"tasks">) {
+      const result = await convex.mutation(api.tasks.remove, { id });
+      if (result.deleted) {
+        removedTaskIds.push(id);
+      }
+
+      return result;
+    }
 
     for (const rawNotionTask of notionTasks) {
       const linkedByMissionControlId = rawNotionTask.missionControlTaskId
@@ -462,7 +541,8 @@ export async function POST() {
       }
 
       seenTaskIds.add(linkedTask._id);
-      const localHash = taskSyncHash(linkedTask, propertyNames);
+      const localPayload = localTaskPayload(linkedTask, propertyNames);
+      const localHash = buildTaskSyncHash(localPayload);
       const lastSyncedHash = linkedTask.notionLastSyncedHash;
       const localChanged = lastSyncedHash ? localHash !== lastSyncedHash : localHash !== notionHash;
       const notionChanged = lastSyncedHash
@@ -512,6 +592,7 @@ export async function POST() {
 
       if (localChanged || linkedTask.notionPageId !== notionTask.pageId) {
         let updatedPage: Awaited<ReturnType<NotionClient["pages"]["update"]>>;
+        let syncedBodyText: string | undefined;
         try {
           updatedPage = await notion.pages.update({
             page_id: notionTask.pageId,
@@ -520,9 +601,10 @@ export async function POST() {
               writablePropertyNames,
             ),
           });
+          syncedBodyText = await pushLocalBodyTextToNotion(notion, notionTask.pageId, linkedTask, propertyNames);
         } catch (error) {
           if (isArchivedOrTrashedNotionMutationError(error)) {
-            const result = await convex.mutation(api.tasks.remove, { id: linkedTask._id });
+            const result = await removeTaskFromMissionControl(linkedTask._id);
             if (result.deleted) {
               summary.deletedFromMissionControl += 1;
             }
@@ -537,6 +619,7 @@ export async function POST() {
           notionDataSourceId: target.dataSourceId,
           notionPageId: notionTask.pageId,
           notionUrl: typeof updatedPage.url === "string" ? updatedPage.url : notionTask.url,
+          ...(propertyNames.description ? {} : { notionBodyText: syncedBodyText }),
           notionLastEditedAt: msFromNotionTime(updatedPage.last_edited_time),
           notionLastSyncedHash: localHash,
         });
@@ -571,7 +654,7 @@ export async function POST() {
       }
 
       if (shouldDeleteMissionControlTaskMissingFromNotion(task, seenTaskIds)) {
-        const result = await convex.mutation(api.tasks.remove, { id: task._id as Id<"tasks"> });
+        const result = await removeTaskFromMissionControl(task._id as Id<"tasks">);
         if (result.deleted) {
           summary.deletedFromMissionControl += 1;
         } else {
@@ -580,11 +663,20 @@ export async function POST() {
         continue;
       }
 
-      if (shouldRemoveLocalOnlyMissionControlTask(task)) {
-        const result = await convex.mutation(api.tasks.remove, { id: task._id as Id<"tasks"> });
-        if (result.deleted) {
-          summary.removedLocalOnly += 1;
-        }
+      if (shouldCreateNotionTaskForLocalOnlyTask(task)) {
+        const localPayload = localTaskPayload(task, propertyNames);
+        const createdPage = await createNotionPageForLocalTask(notion, target.dataSourceId, task, writablePropertyNames);
+        await convex.mutation(api.tasks.markNotionSynced, {
+          id: task._id as Id<"tasks">,
+          notionDatabaseId: target.databaseId,
+          notionDataSourceId: target.dataSourceId,
+          notionPageId: notionPageId(createdPage),
+          notionUrl: notionPageUrl(createdPage),
+          ...(propertyNames.description ? {} : { notionBodyText: localPayload.notionBodyText }),
+          notionLastEditedAt: notionPageLastEditedAt(createdPage),
+          notionLastSyncedHash: buildTaskSyncHash(localPayload),
+        });
+        summary.createdInNotion += 1;
       }
     }
 
@@ -593,6 +685,7 @@ export async function POST() {
       dataSourceId: target.dataSourceId,
       databaseId: target.databaseId,
       propertyNames,
+      removedTaskIds,
       summary,
     });
   } catch (error) {

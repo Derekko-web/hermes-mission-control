@@ -14,7 +14,7 @@ import {
 test("defines a portable workspace template without exposing operator assignees in Tasks", () => {
   assert.equal(MISSION_CONTROL_TEMPLATE.workspaceTitle, "Mission Control");
   assert.equal(MISSION_CONTROL_TEMPLATE.primaryOperator.id, "lead");
-  assert.equal(MISSION_CONTROL_TEMPLATE.primaryOperator.label, "Lead Operator");
+  assert.equal(MISSION_CONTROL_TEMPLATE.primaryOperator.label, "Avery");
   assert.equal(MISSION_CONTROL_TEMPLATE.operators.length, 5);
 
   assert.deepEqual(
@@ -54,5 +54,5 @@ test("builds portable starter tasks, schedules, and memories from the shared wor
   const memories = buildStarterMemories(now);
   assert.equal(memories.length >= 4, true);
   assert.match(memories[0]?.content ?? "", /shared\/missionControlTemplate\.ts/);
-  assert.match(memories[0]?.content ?? "", /Lead Operator/);
+  assert.match(memories[0]?.content ?? "", /Avery/);
 });

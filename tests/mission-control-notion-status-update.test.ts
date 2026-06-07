@@ -12,6 +12,13 @@ test("builds a Notion status property patch from a Mission Control column move",
       },
     },
   });
+  assert.deepEqual(buildNotionStatusPropertyPatch("Status", "In review"), {
+    Status: {
+      status: {
+        name: "In review",
+      },
+    },
+  });
 });
 
 test("detects linked task status drift created during a Hermes run", () => {

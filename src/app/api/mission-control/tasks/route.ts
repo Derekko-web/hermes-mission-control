@@ -6,11 +6,9 @@ import { NextResponse } from "next/server";
 
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
-import { isArchivedOrTrashedNotionMutationError } from "../../../../../shared/missionControlNotionSyncPolicy";
 import {
   isMissionControlTaskStatus,
 } from "../../../../../shared/missionControlTasks";
-import { pushTaskStatusToNotion } from "../../../../lib/mission-control/notionTaskStatus";
 
 function readEnvFileValue(name: string) {
   try {
@@ -59,9 +57,74 @@ function readTaskStatus(value: unknown) {
   throw new Error("A valid task status is required.");
 }
 
+function readTaskPriority(value: unknown) {
+  if (value === "low" || value === "medium" || value === "high") {
+    return value;
+  }
+
+  throw new Error("A valid task priority is required.");
+}
+
+function optionalText(value: unknown, fieldName: string) {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (value === null) {
+    return "";
+  }
+  if (typeof value !== "string") {
+    throw new Error(`${fieldName} must be text.`);
+  }
+
+  return value;
+}
+
+function optionalNumber(value: unknown, fieldName: string) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    throw new Error(`${fieldName} is required.`);
+  }
+
+  return number;
+}
+
 function errorResponse(error: unknown, fallback: string) {
   const message = error instanceof Error ? error.message : fallback;
   return NextResponse.json({ error: message }, { status: 500 });
+}
+
+export async function POST(request: Request) {
+  try {
+    const body = (await request.json()) as unknown;
+    if (!isRecord(body)) {
+      throw new Error("Task payload is required.");
+    }
+
+    const title = requiredText(body.title, "Task title");
+    const client = new ConvexHttpClient(readMissionControlConvexUrl());
+    const task = await client.mutation(api.tasks.create, {
+      title,
+      description: optionalText(body.description, "Description"),
+      status: body.status === undefined ? "Not started" : readTaskStatus(body.status),
+      assignee: optionalText(body.assignee, "Assignee")?.trim() || "unassigned",
+      priority: body.priority === undefined ? "medium" : readTaskPriority(body.priority),
+      project: optionalText(body.project, "Project"),
+      createdBy: "mission-control",
+      kanbanOrder: optionalNumber(body.kanbanOrder, "Kanban order"),
+      operatorAgentId:
+        body.operatorAgentId === undefined
+          ? undefined
+          : (requiredText(body.operatorAgentId, "Pixel Agent id") as Id<"teamMembers">),
+    });
+
+    return NextResponse.json({ task });
+  } catch (error) {
+    return errorResponse(error, "Unable to create card.");
+  }
 }
 
 export async function PATCH(request: Request) {
@@ -74,43 +137,43 @@ export async function PATCH(request: Request) {
     const id = requiredText(body.id, "Task id");
     const patch: {
       id: Id<"tasks">;
+      title?: string;
+      description?: string;
       status?: ReturnType<typeof readTaskStatus>;
+      assignee?: string;
+      priority?: ReturnType<typeof readTaskPriority>;
+      project?: string;
       kanbanOrder?: number;
     } = {
       id: id as Id<"tasks">,
     };
 
+    if (body.title !== undefined) {
+      patch.title = requiredText(body.title, "Task title");
+    }
+    if (body.description !== undefined) {
+      patch.description = optionalText(body.description, "Description");
+    }
     if (body.status !== undefined) {
       patch.status = readTaskStatus(body.status);
     }
+    if (body.assignee !== undefined) {
+      patch.assignee = optionalText(body.assignee, "Assignee")?.trim() || "unassigned";
+    }
+    if (body.priority !== undefined) {
+      patch.priority = readTaskPriority(body.priority);
+    }
+    if (body.project !== undefined) {
+      patch.project = optionalText(body.project, "Project");
+    }
     if (body.kanbanOrder !== undefined) {
-      const kanbanOrder = Number(body.kanbanOrder);
-      if (!Number.isFinite(kanbanOrder)) {
-        throw new Error("A valid Kanban order is required.");
-      }
-      patch.kanbanOrder = kanbanOrder;
+      patch.kanbanOrder = optionalNumber(body.kanbanOrder, "Kanban order");
     }
 
     const client = new ConvexHttpClient(readMissionControlConvexUrl());
     const existingTask = await client.query(api.tasks.get, { id: patch.id });
     if (!existingTask) {
       throw new Error("Task not found.");
-    }
-    if (patch.status) {
-      try {
-        await pushTaskStatusToNotion(existingTask, patch.status);
-      } catch (error) {
-        if (existingTask.notionPageId && isArchivedOrTrashedNotionMutationError(error)) {
-          const result = await client.mutation(api.tasks.remove, { id: patch.id });
-          return NextResponse.json({
-            deleted: result.deleted,
-            taskId: patch.id,
-            archivedRemote: true,
-          });
-        }
-
-        throw error;
-      }
     }
 
     const task = await client.mutation(api.tasks.update, patch);

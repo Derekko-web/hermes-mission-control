@@ -7,13 +7,13 @@ import { ConvexHttpClient } from "convex/browser";
 import { NextResponse } from "next/server";
 
 import { api } from "../../../../../../convex/_generated/api";
-import type { Doc, Id } from "../../../../../../convex/_generated/dataModel";
+import type { Id } from "../../../../../../convex/_generated/dataModel";
 import {
   buildHermesAgentPromptContent,
+  buildHermesCliPromptContent,
   buildHermesChatArgs,
   parseHermesChatOutput,
 } from "../../../../../components/mission-control/mission-control-hermes-cli";
-import { pushChangedTaskStatusToNotion } from "../../../../../lib/mission-control/notionTaskStatus";
 
 const execFileAsync = promisify(execFile);
 
@@ -32,7 +32,6 @@ type HermesRouteOfficeAgent = {
   summary?: string;
   responsibilities: string[];
 };
-type TaskDoc = Doc<"tasks">;
 
 function readMissionControlConvexUrl() {
   try {
@@ -61,10 +60,12 @@ async function runHermesChat(args: {
   const { stdout, stderr } = await execFileAsync(
     "hermes",
     buildHermesChatArgs({
-      content: buildHermesAgentPromptContent({
-        content: args.content,
-        agent: args.officeAgent,
-      }),
+      content: buildHermesCliPromptContent(
+        buildHermesAgentPromptContent({
+          content: args.content,
+          agent: args.officeAgent,
+        }),
+      ),
       modelId: args.modelId,
       sessionId: args.sessionId,
       source: args.officeAgent ? "mission-control-hermes-office-agent" : "mission-control-hermes",
@@ -106,25 +107,6 @@ async function resolveOfficeAgentForHermes(
   return officeAgent ?? null;
 }
 
-async function resolveHermesLinkedTask(
-  client: ConvexHttpClient,
-  args: {
-    taskId?: Id<"tasks">;
-    threadId?: Id<"hermesThreads">;
-  },
-) {
-  if (args.taskId) {
-    return await client.query(api.tasks.get, { id: args.taskId });
-  }
-
-  if (!args.threadId) {
-    return null;
-  }
-
-  const tasks = await client.query(api.tasks.list, {});
-  return tasks.find((task: TaskDoc) => task.hermesThreadId === args.threadId) ?? null;
-}
-
 export async function POST(request: Request) {
   try {
     const body = (await request.json()) as {
@@ -132,6 +114,7 @@ export async function POST(request: Request) {
       officeAgentId?: Id<"teamMembers">;
       taskId?: Id<"tasks">;
       content?: string;
+      officeActivity?: string;
       attachments?: HermesRouteAttachment[];
       recordUserMessage?: boolean;
     };
@@ -156,10 +139,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "A Hermes thread is required for assistant-only sends." }, { status: 400 });
     }
 
-    const taskBeforeHermes = await resolveHermesLinkedTask(client, {
-      taskId: body.taskId,
-      threadId: body.threadId,
-    });
     const hermesResult = await runHermesChat({
       content: body.content ?? "",
       modelId: existingThread?.modelId,
@@ -178,21 +157,13 @@ export async function POST(request: Request) {
         })
       : await client.mutation(api.hermesThreads.recordAssistantResponse, {
           threadId: body.threadId!,
+          taskId: body.taskId,
           content: body.content ?? "",
           assistantContent: hermesResult.response,
           hermesSessionId: hermesResult.sessionId,
           officeAgentId: officeAgent?._id,
+          officeActivity: body.officeActivity,
         });
-    const taskAfterHermes = taskBeforeHermes
-      ? await client.query(api.tasks.get, { id: taskBeforeHermes._id })
-      : await resolveHermesLinkedTask(client, {
-          taskId: body.taskId,
-          threadId: body.threadId,
-        });
-    await pushChangedTaskStatusToNotion({
-      beforeTask: taskBeforeHermes,
-      afterTask: taskAfterHermes,
-    });
 
     if (!sendResult.threadId) {
       return NextResponse.json({ error: "Hermes send did not return a thread." }, { status: 400 });

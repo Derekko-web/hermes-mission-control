@@ -20,6 +20,21 @@ function readConvexUrl() {
 
 const client = new ConvexHttpClient(readConvexUrl());
 
+async function clearOfficeActivity(memberName: string | undefined | null, expectedCurrentTask: string) {
+  if (!memberName) {
+    return;
+  }
+
+  try {
+    await client.mutation(api.officePresence.clearMemberActivity, {
+      memberName,
+      expectedCurrentTask,
+    });
+  } catch {
+    // Ignore cleanup failures while the mutation is still under development.
+  }
+}
+
 test("new Hermes chats can be created immediately before the first message is sent", async (t) => {
   let threadId: Id<"hermesThreads"> | null = null;
 
@@ -67,8 +82,11 @@ test("new Hermes chats can be created immediately before the first message is se
 
 test("records a real Hermes exchange on a thread and stores the Hermes session id", async (t) => {
   let threadId: Id<"hermesThreads"> | null = null;
+  const cleanupTarget: { officeAgentName?: string } = {};
 
   t.after(async () => {
+    await clearOfficeActivity(cleanupTarget.officeAgentName, "Hermes: what's today's date?");
+
     if (!threadId) {
       return;
     }
@@ -82,6 +100,7 @@ test("records a real Hermes exchange on a thread and stores the Hermes session i
 
   const createdThread = await client.mutation(api.hermesThreads.createThread, {});
   threadId = createdThread.threadId;
+  cleanupTarget.officeAgentName = createdThread.officeAgentName;
 
   const recorded = await client.mutation(api.hermesThreads.recordExchange, {
     threadId,
@@ -144,8 +163,12 @@ test("records a task handoff as a user message without running Hermes", async (t
 
 test("records a Hermes task result without duplicating the task handoff message", async (t) => {
   let threadId: Id<"hermesThreads"> | null = null;
+  const cleanupTarget: { officeAgentName?: string } = {};
+  const officeActivity = "Working on Review launch handoff";
 
   t.after(async () => {
+    await clearOfficeActivity(cleanupTarget.officeAgentName, officeActivity);
+
     if (!threadId) {
       return;
     }
@@ -159,6 +182,7 @@ test("records a Hermes task result without duplicating the task handoff message"
 
   const createdThread = await client.mutation(api.hermesThreads.createThread, {});
   threadId = createdThread.threadId;
+  cleanupTarget.officeAgentName = createdThread.officeAgentName;
 
   await client.mutation(api.hermesThreads.recordTaskHandoff, {
     threadId,
@@ -169,6 +193,7 @@ test("records a Hermes task result without duplicating the task handoff message"
     content: "Run Review launch handoff, but do not rewrite the card description.",
     assistantContent: "Done. I finished the launch handoff and kept the card description unchanged.",
     hermesSessionId: "20260603_120000_taskrun",
+    officeActivity,
   });
 
   assert.equal(recorded.inserted, 1);
@@ -188,8 +213,12 @@ test("records a Hermes task result without duplicating the task handoff message"
 test("linking a task to a Hermes thread stores the Pixel Agent claim on the task", async (t) => {
   let taskId: Id<"tasks"> | null = null;
   let threadId: Id<"hermesThreads"> | null = null;
+  const cleanupTarget: { officeAgentName?: string } = {};
+  const officeActivity = "Working on Verify Pixel Agent task claim";
 
   t.after(async () => {
+    await clearOfficeActivity(cleanupTarget.officeAgentName, officeActivity);
+
     if (taskId) {
       try {
         await client.mutation(api.tasks.remove, { id: taskId });
@@ -226,18 +255,22 @@ test("linking a task to a Hermes thread stores the Pixel Agent claim on the task
     hermesThreadId: threadId,
     operatorAgentId: officeAgent._id,
   });
-  await client.mutation(api.hermesThreads.recordAssistantResponse, {
+  const recordedReviewTransition = await client.mutation(api.hermesThreads.recordAssistantResponse, {
     threadId,
     content: "Run the task, but leave the card status unchanged for user review.",
     assistantContent: "Done from the Hermes thread. The card is ready for review.",
     hermesSessionId: "20260603_121500_review",
     officeAgentId: officeAgent._id,
+    officeActivity,
   });
+  cleanupTarget.officeAgentName = officeAgent.name;
   const taskAfterHermesReply = await client.query(api.tasks.get, { id: taskId });
 
   assert.equal(linkedTask?.hermesThreadId, threadId);
   assert.equal(linkedTask?.operatorAgentId, officeAgent._id);
   assert.equal(linkedTask?.operatorAgentName, officeAgent.name);
   assert.equal(linkedTask?.operatorAgentRoleTitle, officeAgent.roleTitle);
-  assert.equal(taskAfterHermesReply?.status, "In progress");
+  assert.equal(recordedReviewTransition.reviewTransition?.taskId, taskId);
+  assert.equal(recordedReviewTransition.reviewTransition?.nextStatus, "In review");
+  assert.equal(taskAfterHermesReply?.status, "In review");
 });

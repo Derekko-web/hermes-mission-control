@@ -129,8 +129,8 @@ export const MISSION_CONTROL_TEMPLATE = {
   workspaceSubtitle: "Portable Hermes workspace template",
   primaryOperator: {
     id: "lead",
-    label: "Lead Operator",
-    roleTitle: "Primary Agent",
+    label: "Avery",
+    roleTitle: "Codex Sub-agent",
     summary:
       "Owns delivery, routes work through specialist lanes, and turns the local Hermes setup into one coherent operating surface.",
     tagline: "I turn mission intent into finished work.",
@@ -139,7 +139,7 @@ export const MISSION_CONTROL_TEMPLATE = {
     state: "observed",
     cadence: "always_on",
     color: "amber",
-    avatarLabel: "L",
+    avatarLabel: "A",
     responsibilities: [
       "Own the user-facing outcome from first request to final verification.",
       "Delegate deep work to the right specialist lane when speed or perspective matters.",
@@ -161,8 +161,8 @@ export const MISSION_CONTROL_TEMPLATE = {
   operators: [
     {
       id: "lead",
-      label: "Lead Operator",
-      roleTitle: "Primary Agent",
+      label: "Avery",
+      roleTitle: "Codex Sub-agent",
       summary:
         "Owns delivery, routes work through specialist lanes, and turns the local Hermes setup into one coherent operating surface.",
       tagline: "I turn mission intent into finished work.",
@@ -171,7 +171,7 @@ export const MISSION_CONTROL_TEMPLATE = {
       state: "observed",
       cadence: "always_on",
       color: "amber",
-      avatarLabel: "L",
+      avatarLabel: "A",
       responsibilities: [
         "Own the user-facing outcome from first request to final verification.",
         "Delegate deep work to the right specialist lane when speed or perspective matters.",
@@ -192,8 +192,8 @@ export const MISSION_CONTROL_TEMPLATE = {
     },
     {
       id: "architect",
-      label: "Architecture Scout",
-      roleTitle: "Systems Scout",
+      label: "Blake",
+      roleTitle: "Codex Sub-agent",
       summary:
         "Maps file boundaries, dependency edges, and migration risk before implementation starts moving.",
       tagline: "I map the terrain before code starts moving.",
@@ -202,7 +202,7 @@ export const MISSION_CONTROL_TEMPLATE = {
       state: "observed",
       cadence: "regular",
       color: "emerald",
-      avatarLabel: "A",
+      avatarLabel: "B",
       responsibilities: [
         "Trace repo boundaries before edits begin.",
         "Frame tradeoffs and migration risk.",
@@ -223,8 +223,8 @@ export const MISSION_CONTROL_TEMPLATE = {
     },
     {
       id: "builder",
-      label: "Implementation Engineer",
-      roleTitle: "Implementation Engineer",
+      label: "Casey",
+      roleTitle: "Codex Sub-agent",
       summary:
         "Turns scoped intent into concrete code, fixes, and glue logic without losing the architectural thread.",
       tagline: "I turn scoped intent into reliable implementation.",
@@ -233,7 +233,7 @@ export const MISSION_CONTROL_TEMPLATE = {
       state: "formalized",
       cadence: "regular",
       color: "cyan",
-      avatarLabel: "I",
+      avatarLabel: "C",
       responsibilities: [
         "Build and refactor production code safely.",
         "Wire reusable workspace configuration into the UI.",
@@ -254,8 +254,8 @@ export const MISSION_CONTROL_TEMPLATE = {
     },
     {
       id: "writer",
-      label: "Writer Specialist",
-      roleTitle: "Writer Specialist",
+      label: "Drew",
+      roleTitle: "Codex Sub-agent",
       summary:
         "Sharpens setup notes, memory documents, and interface copy so the workspace is easy to customize.",
       tagline: "I make the message clearer, tighter, and easier to ship.",
@@ -264,7 +264,7 @@ export const MISSION_CONTROL_TEMPLATE = {
       state: "formalized",
       cadence: "regular",
       color: "violet",
-      avatarLabel: "W",
+      avatarLabel: "D",
       responsibilities: [
         "Document how to customize the template.",
         "Keep setup memory concise and useful.",
@@ -285,8 +285,8 @@ export const MISSION_CONTROL_TEMPLATE = {
     },
     {
       id: "designer",
-      label: "Product Designer",
-      roleTitle: "Product Designer",
+      label: "Emery",
+      roleTitle: "Codex Sub-agent",
       summary:
         "Pushes layout clarity, visual hierarchy, and interaction polish so the template still feels production-ready.",
       tagline: "I push layouts toward clarity, polish, and confidence.",
@@ -295,7 +295,7 @@ export const MISSION_CONTROL_TEMPLATE = {
       state: "formalized",
       cadence: "regular",
       color: "rose",
-      avatarLabel: "D",
+      avatarLabel: "E",
       responsibilities: [
         "Translate a custom operator roster into coherent UI.",
         "Keep the portable branch visually polished.",

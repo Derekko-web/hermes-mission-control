@@ -24,7 +24,7 @@ export function shouldDeleteMissionControlTaskMissingFromNotion(
   return Boolean(task.notionPageId && !seenTaskIds.has(task._id));
 }
 
-export function shouldRemoveLocalOnlyMissionControlTask(task: MissionControlNotionLinkedTaskLike) {
+export function shouldCreateNotionTaskForLocalOnlyTask(task: MissionControlNotionLinkedTaskLike) {
   return !task.notionPageId;
 }
 

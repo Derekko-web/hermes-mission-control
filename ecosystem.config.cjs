@@ -21,6 +21,17 @@ module.exports = {
       }
     },
     {
+      name: "hermes-mission-control-terminal",
+      cwd: "/home/derek/.hermes/mission-control",
+      script: "npm",
+      args: "run hermes:terminal",
+      env: {
+        HOME: "/home/derek",
+        HERMES_TERMINAL_PORT: "4323",
+        HERMES_TERMINAL_WORKSPACE: "/home/derek/.hermes/mission-control"
+      }
+    },
+    {
       name: "hermes-mission-control-webhook-gateway",
       cwd: "/home/derek/.hermes/mission-control",
       script: "scripts/mission-control-webhook-gateway.mjs",

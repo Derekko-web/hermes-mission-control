@@ -19,11 +19,35 @@ const STATUS_LABELS: Record<OfficePresenceDoc["status"], string> = {
 
 export const LIVE_ACTIVITY_WINDOW_MS = 30 * 60_000;
 
+function isInternalHermesInstructionActivity(
+  presence: Pick<OfficePresenceDoc, "activeTool" | "currentTask">,
+) {
+  if (presence.activeTool !== "Hermes") {
+    return false;
+  }
+
+  const activity = presence.currentTask?.trim().toLowerCase();
+  if (!activity) {
+    return false;
+  }
+
+  return (
+    activity.startsWith("hermes: run the task, but leave the card status") ||
+    activity.startsWith("hermes: start working on this mission control task") ||
+    activity.includes("mission control card rule:") ||
+    activity.includes("do not change the card status")
+  );
+}
+
 export function isLiveOfficePresence(
-  presence: Pick<OfficePresenceDoc, "status" | "lastUpdatedAt">,
+  presence: Pick<OfficePresenceDoc, "activeTool" | "currentTask" | "status" | "lastUpdatedAt">,
   now = Date.now(),
 ) {
-  return presence.status !== "idle" && now - presence.lastUpdatedAt <= LIVE_ACTIVITY_WINDOW_MS;
+  return (
+    presence.status !== "idle" &&
+    !isInternalHermesInstructionActivity(presence) &&
+    now - presence.lastUpdatedAt <= LIVE_ACTIVITY_WINDOW_MS
+  );
 }
 
 export function buildPixelOfficeAgents(

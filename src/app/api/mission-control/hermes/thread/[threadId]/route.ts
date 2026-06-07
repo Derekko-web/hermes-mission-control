@@ -10,6 +10,7 @@ import { api } from "../../../../../../../convex/_generated/api";
 import type { Id } from "../../../../../../../convex/_generated/dataModel";
 
 const execFileAsync = promisify(execFile);
+const HERMES_TERMINAL_PORT = process.env.HERMES_TERMINAL_PORT ?? "4323";
 
 function readMissionControlConvexUrl() {
   try {
@@ -27,6 +28,18 @@ function readMissionControlConvexUrl() {
   }
 
   throw new Error("NEXT_PUBLIC_CONVEX_URL is missing.");
+}
+
+async function destroyHermesTerminalSession(threadId: string) {
+  const baseUrl = process.env.HERMES_TERMINAL_HTTP_URL ?? `http://127.0.0.1:${HERMES_TERMINAL_PORT}`;
+
+  try {
+    await fetch(`${baseUrl}/session/${encodeURIComponent(threadId)}`, {
+      method: "DELETE",
+    });
+  } catch {
+    // The terminal sidecar may not be running in non-interactive deployments.
+  }
 }
 
 export async function PATCH(
@@ -75,6 +88,8 @@ export async function DELETE(
     if (!existingThread) {
       return NextResponse.json({ error: "Hermes thread not found." }, { status: 404 });
     }
+
+    await destroyHermesTerminalSession(threadId);
 
     if (existingThread.hermesSessionId) {
       try {

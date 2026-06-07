@@ -27,7 +27,7 @@ function readMissionControlConvexUrl() {
 
 async function readCreateThreadBody(request: Request) {
   try {
-    return (await request.json()) as { officeAgentId?: Id<"teamMembers"> };
+    return (await request.json()) as { title?: string; officeAgentId?: Id<"teamMembers"> };
   } catch {
     return {};
   }
@@ -39,6 +39,7 @@ export async function POST(request: Request) {
     const client = new ConvexHttpClient(readMissionControlConvexUrl());
     await client.mutation(api.teamMembers.ensureSeedData, {});
     const createdThread = await client.mutation(api.hermesThreads.createThread, {
+      title: body.title,
       officeAgentId: body.officeAgentId,
     });
     const threads = await client.query(api.hermesThreads.listThreads, {});

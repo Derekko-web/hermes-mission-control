@@ -8,4 +8,5 @@ convex/.convex
 .mission-control/
 .playwright-cli/
 cleanup-backups/
+output/
 tsconfig.tsbuildinfo

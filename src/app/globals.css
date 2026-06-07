@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@import "@xterm/xterm/css/xterm.css";
 
 @custom-variant dark (&:is(.dark *));
 
@@ -66,11 +67,115 @@ html.mission-control-light body {
   color: #18181b;
 }
 
-html.mission-control-light [data-slot="mission-control-light-mode-button"] {
-  border-color: rgba(24, 24, 27, 0.12);
-  background: rgba(255, 255, 255, 0.9);
+html.mission-control-light .mission-control-shell {
+  background: #f8fafc !important;
+  color: #18181b !important;
+}
+
+html.mission-control-light [data-slot="mission-control-workspace"],
+html.mission-control-light [data-slot="mission-control-main"] {
+  background: radial-gradient(circle at top right, rgba(129, 140, 248, 0.18), transparent 30%),
+    radial-gradient(circle at top left, rgba(34, 197, 94, 0.12), transparent 24%), #f8fafc !important;
   color: #18181b;
+}
+
+html.mission-control-light [data-slot="mission-control-primary-sidebar"],
+html.mission-control-light .mission-control-shell > div > aside:first-child {
+  border-color: rgba(15, 23, 42, 0.1) !important;
+  background: rgba(255, 255, 255, 0.92) !important;
+  color: #18181b !important;
+  box-shadow: 10px 0 30px rgba(15, 23, 42, 0.06);
+}
+
+html.mission-control-light [data-slot="mission-control-sidebar-brand"] h1,
+html.mission-control-light [data-slot="mission-control-sidebar-brand"] svg,
+html.mission-control-light [data-slot="mission-control-primary-sidebar"] a[aria-label] {
+  color: #18181b !important;
+}
+
+html.mission-control-light [data-slot="mission-control-sidebar-brand"] > div > div:first-child,
+html.mission-control-light [data-slot="mission-control-primary-sidebar"] > div:last-child,
+html.mission-control-light [data-slot="mission-control-light-mode-button"] {
+  border-color: rgba(24, 24, 27, 0.12) !important;
+  background: rgba(255, 255, 255, 0.9) !important;
+  color: #18181b !important;
+}
+
+html.mission-control-light [data-slot="mission-control-light-mode-button"] {
   box-shadow: 0 10px 30px rgba(15, 23, 42, 0.14);
+}
+
+html.mission-control-light .mission-control-column,
+html.mission-control-light [data-slot="calendar-always-running"],
+html.mission-control-light [data-slot="calendar-next-up"],
+html.mission-control-light [data-slot="calendar-day-card"],
+html.mission-control-light [data-slot="memory-browser-panel"],
+html.mission-control-light [data-slot="memory-reader-panel"],
+html.mission-control-light [data-slot="office-activity-panel"],
+html.mission-control-light [data-task-card-id] {
+  border-color: rgba(15, 23, 42, 0.1) !important;
+  background: rgba(255, 255, 255, 0.86) !important;
+  color: #18181b !important;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+}
+
+html.mission-control-light .mission-control-shell input,
+html.mission-control-light .mission-control-shell textarea {
+  color: #18181b !important;
+}
+
+html.mission-control-light .mission-control-shell ::placeholder {
+  color: #64748b !important;
+}
+
+html.mission-control-light .mission-control-shell .text-white,
+html.mission-control-light .mission-control-shell .text-zinc-50,
+html.mission-control-light .mission-control-shell .text-zinc-100,
+html.mission-control-light .mission-control-shell .text-zinc-200,
+html.mission-control-light .mission-control-shell .text-zinc-300,
+html.mission-control-light .mission-control-shell .text-zinc-400 {
+  color: #18181b !important;
+}
+
+html.mission-control-light .mission-control-shell .text-zinc-500,
+html.mission-control-light .mission-control-shell .text-zinc-600 {
+  color: #64748b !important;
+}
+
+html.mission-control-light .mission-control-shell .text-indigo-100,
+html.mission-control-light .mission-control-shell .text-indigo-200,
+html.mission-control-light .mission-control-shell .text-indigo-300 {
+  color: #4f46e5 !important;
+}
+
+html.mission-control-light .mission-control-shell .text-violet-300,
+html.mission-control-light .mission-control-shell .text-purple-300 {
+  color: #7c3aed !important;
+}
+
+html.mission-control-light .mission-control-shell .text-emerald-50,
+html.mission-control-light .mission-control-shell .text-emerald-100,
+html.mission-control-light .mission-control-shell .text-emerald-200,
+html.mission-control-light .mission-control-shell .text-emerald-300 {
+  color: #047857 !important;
+}
+
+html.mission-control-light .mission-control-shell .text-cyan-100,
+html.mission-control-light .mission-control-shell .text-cyan-200,
+html.mission-control-light .mission-control-shell .text-cyan-300 {
+  color: #0e7490 !important;
+}
+
+html.mission-control-light .mission-control-shell .text-amber-100,
+html.mission-control-light .mission-control-shell .text-amber-200,
+html.mission-control-light .mission-control-shell .text-amber-300 {
+  color: #b45309 !important;
+}
+
+html.mission-control-light .mission-control-shell .text-rose-100,
+html.mission-control-light .mission-control-shell .text-rose-200,
+html.mission-control-light .mission-control-shell .text-rose-300 {
+  color: #be123c !important;
 }
 
 @keyframes shop-dashboard-enter {

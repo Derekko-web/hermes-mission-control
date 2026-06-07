@@ -4,8 +4,8 @@ import test from "node:test";
 import {
   isArchivedOrTrashedNotionMutationError,
   isVisibleNotionPageRecord,
+  shouldCreateNotionTaskForLocalOnlyTask,
   shouldDeleteMissionControlTaskMissingFromNotion,
-  shouldRemoveLocalOnlyMissionControlTask,
 } from "../shared/missionControlNotionSyncPolicy";
 
 test("treats archived and trashed Notion pages as absent from Mission Control sync", () => {
@@ -36,10 +36,10 @@ test("deletes linked Mission Control tasks when their Notion page is missing", (
   );
 });
 
-test("removes local-only Mission Control tasks instead of creating Notion cards", () => {
-  assert.equal(shouldRemoveLocalOnlyMissionControlTask({ _id: "task-1" }), true);
+test("creates Notion cards for local-only Mission Control tasks", () => {
+  assert.equal(shouldCreateNotionTaskForLocalOnlyTask({ _id: "task-1" }), true);
   assert.equal(
-    shouldRemoveLocalOnlyMissionControlTask({ _id: "task-2", notionPageId: "notion-page-2" }),
+    shouldCreateNotionTaskForLocalOnlyTask({ _id: "task-2", notionPageId: "notion-page-2" }),
     false,
   );
 });

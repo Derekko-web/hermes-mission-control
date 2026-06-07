@@ -110,28 +110,12 @@ function verifyNotionSignature(rawBody: string, signature: string | null, verifi
   return expectedBuffer.length === signatureBuffer.length && timingSafeEqual(expectedBuffer, signatureBuffer);
 }
 
-function missionControlInternalBaseUrl() {
-  return readOptionalEnv("MISSION_CONTROL_INTERNAL_BASE_URL") ?? `http://127.0.0.1:${process.env.PORT ?? "4322"}`;
-}
-
-async function triggerNotionSync() {
-  const syncUrl = new URL("/api/mission-control/notion/sync", missionControlInternalBaseUrl());
-  const response = await fetch(syncUrl, { method: "POST" });
-  const payload = (await response.json().catch(() => null)) as { error?: string } | null;
-
-  if (!response.ok) {
-    throw new Error(payload?.error ?? "Unable to sync Notion tasks from webhook.");
-  }
-
-  return payload;
-}
-
 export async function GET() {
   return NextResponse.json({
     ok: true,
     service: "Mission Control Notion webhook",
     accepts: ["POST"],
-    note: "Use this URL in Notion's Webhooks tab. Browser visits are health checks only.",
+    note: "Webhook events are accepted for verification only. Use the Mission Control sync button to sync tasks.",
   });
 }
 
@@ -175,11 +159,9 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, ignored: true });
   }
 
-  try {
-    const sync = await triggerNotionSync();
-    return NextResponse.json({ ok: true, sync });
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unable to sync Notion tasks from webhook.";
-    return NextResponse.json({ ok: false, error: message }, { status: 500 });
-  }
+  return NextResponse.json({
+    ok: true,
+    syncDeferred: true,
+    manualSyncRequired: true,
+  });
 }

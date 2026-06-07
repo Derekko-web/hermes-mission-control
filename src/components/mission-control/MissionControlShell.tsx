@@ -155,14 +155,43 @@ function useMissionControlCommandPalette() {
   };
 }
 
-const LIGHT_MODE_STORAGE_KEY = "mission-control-light-mode";
+export type MissionControlTheme = "dark" | "light";
+
+export const MISSION_CONTROL_THEME_STORAGE_KEY = "mission-control-theme";
+const LEGACY_LIGHT_MODE_STORAGE_KEY = "mission-control-light-mode";
+
+export function resolveStoredMissionControlTheme(value: string | null): MissionControlTheme {
+  return value === "light" || value === "true" ? "light" : "dark";
+}
+
+export function getNextMissionControlTheme(theme: MissionControlTheme): MissionControlTheme {
+  return theme === "light" ? "dark" : "light";
+}
+
+export function formatMissionControlThemeButtonLabel(theme: MissionControlTheme) {
+  return theme === "light" ? "Dark mode" : "Light mode";
+}
+
+export function formatMissionControlThemeAriaLabel(theme: MissionControlTheme) {
+  return theme === "light" ? "Switch to dark mode" : "Switch to light mode";
+}
+
+function applyMissionControlTheme(theme: MissionControlTheme) {
+  document.documentElement.classList.toggle("mission-control-light", theme === "light");
+  document.documentElement.dataset.missionControlTheme = theme;
+}
 
 function MissionControlLightModeButton() {
-  const [lightModeEnabled, setLightModeEnabled] = useState(false);
+  const [theme, setTheme] = useState<MissionControlTheme>("dark");
   const [hydrated, setHydrated] = useState(false);
 
   useEffect(() => {
-    setLightModeEnabled(window.localStorage.getItem(LIGHT_MODE_STORAGE_KEY) === "true");
+    const storedTheme = window.localStorage.getItem(MISSION_CONTROL_THEME_STORAGE_KEY);
+    const legacyLightMode =
+      storedTheme === null ? window.localStorage.getItem(LEGACY_LIGHT_MODE_STORAGE_KEY) : null;
+    const resolvedTheme = resolveStoredMissionControlTheme(storedTheme ?? legacyLightMode);
+
+    setTheme(resolvedTheme);
     setHydrated(true);
   }, []);
 
@@ -171,24 +200,24 @@ function MissionControlLightModeButton() {
       return;
     }
 
-    document.documentElement.classList.toggle("mission-control-light", lightModeEnabled);
-    window.localStorage.setItem(LIGHT_MODE_STORAGE_KEY, String(lightModeEnabled));
-  }, [hydrated, lightModeEnabled]);
+    applyMissionControlTheme(theme);
+    window.localStorage.setItem(MISSION_CONTROL_THEME_STORAGE_KEY, theme);
+    window.localStorage.removeItem(LEGACY_LIGHT_MODE_STORAGE_KEY);
+  }, [hydrated, theme]);
 
-  const Icon = lightModeEnabled ? Moon : Sun;
-  const label = lightModeEnabled ? "Dark mode" : "Light mode";
+  const Icon = theme === "light" ? Moon : Sun;
 
   return (
     <button
       type="button"
       data-slot="mission-control-light-mode-button"
-      aria-label={lightModeEnabled ? "Switch to dark mode" : "Switch to light mode"}
-      aria-pressed={lightModeEnabled}
-      onClick={() => setLightModeEnabled((current) => !current)}
+      aria-label={formatMissionControlThemeAriaLabel(theme)}
+      aria-pressed={theme === "light"}
+      onClick={() => setTheme((current) => getNextMissionControlTheme(current))}
       className="fixed right-4 top-4 z-[45] flex h-9 items-center gap-2 rounded-full border border-white/[0.1] bg-[#111116]/85 px-3 text-xs font-semibold text-zinc-100 shadow-[0_10px_30px_rgba(0,0,0,0.28)] backdrop-blur transition hover:bg-white/[0.1] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8992ff]/55"
     >
       <Icon className="h-3.5 w-3.5" aria-hidden="true" />
-      <span>{label}</span>
+      <span>{formatMissionControlThemeButtonLabel(theme)}</span>
     </button>
   );
 }
@@ -261,7 +290,7 @@ function SidebarPanel({ tool, className = "" }: { tool: MissionControlTool; clas
           N
         </span>
         <span className="whitespace-nowrap opacity-0 transition duration-200 group-hover/sidebar:opacity-100 group-focus-within/sidebar:opacity-100">
-          Notion ready
+          Notion sync
         </span>
       </div>
     </aside>
@@ -399,7 +428,7 @@ function CompactShell({ tool, children, variant }: MissionControlShellProps & { 
       <MissionControlLightModeButton />
       <div data-slot="mission-control-workspace" className={workspaceClassName}>
         <SidebarPanel tool={tool} className="flex" />
-        <main className={mainClassName}>{children}</main>
+        <main data-slot="mission-control-main" className={mainClassName}>{children}</main>
       </div>
     </div>
   );
@@ -448,8 +477,8 @@ function DefaultShell({ tool, children }: MissionControlShellProps) {
 
         <SidebarPanel tool={tool} className="hidden lg:flex" />
 
-        <main className="relative overflow-hidden bg-[radial-gradient(circle_at_top_right,rgba(139,146,255,0.14),transparent_30%),radial-gradient(circle_at_top_left,rgba(34,197,94,0.08),transparent_24%),#0a0b0f] px-4 pb-8 pt-5 lg:px-6 lg:pb-8 lg:pt-5">
-          <div className="mx-auto max-w-[1360px]">{children}</div>
+        <main data-slot="mission-control-main" className="relative min-h-0 overflow-y-auto overflow-x-hidden bg-[radial-gradient(circle_at_top_right,rgba(139,146,255,0.14),transparent_30%),radial-gradient(circle_at_top_left,rgba(34,197,94,0.08),transparent_24%),#0a0b0f] px-4 pb-8 pt-5 lg:px-6 lg:pb-8 lg:pt-5">
+          <div className="mx-auto h-full min-h-0 max-w-[1360px]">{children}</div>
         </main>
       </div>
     </div>

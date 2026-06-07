@@ -19,8 +19,8 @@ That one file controls:
 - starter task, calendar, and memory content
 
 Examples:
-- rename `Lead Operator` to `Claude Code`
-- rename `Implementation Engineer` to `RC Trinity`
+- rename `Avery` to `Claude Code`
+- rename `Casey` to `RC Trinity`
 - swap the starter schedules for your real cron jobs
 - replace starter memory entries with your real operating notes
 

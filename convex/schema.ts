@@ -4,6 +4,7 @@ import { v } from "convex/values";
 const taskStatus = v.union(
   v.literal("Not started"),
   v.literal("In progress"),
+  v.literal("In review"),
   v.literal("Done"),
   v.literal("recurring"),
   v.literal("backlog"),
